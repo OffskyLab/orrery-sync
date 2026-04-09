@@ -29,7 +29,7 @@ actor SyncDaemon {
     #endif
     private var rvClient: RendezvousClient?
 
-    static let version = "0.1.0"
+    static let version = "1.0.0"
 
     init(port: Int, syncDirectory: String, socketPath: String, tls: SyncTLSContext? = nil, rendezvousAddress: String? = nil) {
         self.port = port
