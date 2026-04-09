@@ -2,6 +2,7 @@ import Foundation
 import NMTP
 import NIO
 import Logging
+import Crypto
 
 /// Core daemon that manages NMT server, peer connections, file watching, and control socket.
 actor SyncDaemon {
@@ -412,10 +413,7 @@ actor SyncDaemon {
 
     private func computeHash(of path: String) -> String {
         guard let data = FileManager.default.contents(atPath: path) else { return "" }
-        // Simple hash: use data count + first/last bytes as quick fingerprint
-        // TODO: Replace with proper SHA256
-        var hasher = Hasher()
-        hasher.combine(data)
-        return String(hasher.finalize(), radix: 16)
+        let digest = SHA256.hash(data: data)
+        return digest.map { String(format: "%02x", $0) }.joined()
     }
 }
