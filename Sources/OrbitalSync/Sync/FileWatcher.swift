@@ -12,8 +12,12 @@ struct FileWatcher: Sendable {
 
     init(directory: String) {
         // Resolve symlinks (e.g. /tmp → /private/tmp on macOS)
-        let url = URL(fileURLWithPath: directory).resolvingSymlinksInPath()
-        self.directory = url.path
+        if let resolved = realpath(directory, nil) {
+            self.directory = String(cString: resolved)
+            free(resolved)
+        } else {
+            self.directory = directory
+        }
     }
 
     func watch() -> AsyncStream<FileChange> {

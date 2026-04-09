@@ -21,9 +21,21 @@ actor SyncDaemon {
     init(port: Int, syncDirectory: String, socketPath: String) {
         self.port = port
         // Resolve symlinks (e.g. /tmp → /private/tmp on macOS)
-        self.syncDirectory = URL(fileURLWithPath: syncDirectory).resolvingSymlinksInPath().path
+        self.syncDirectory = Self.resolveRealPath(syncDirectory)
         self.socketPath = socketPath
         self.peerID = UUID().uuidString
+    }
+
+    private static func resolveRealPath(_ path: String) -> String {
+        // Ensure parent exists so realpath can resolve
+        let fm = FileManager.default
+        try? fm.createDirectory(atPath: path, withIntermediateDirectories: true)
+        if let resolved = realpath(path, nil) {
+            let result = String(cString: resolved)
+            free(resolved)
+            return result
+        }
+        return path
     }
 
     // MARK: - Lifecycle
