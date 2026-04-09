@@ -213,15 +213,54 @@ actor SyncDaemon {
             try? cfg.save()
         }
 
-        // Start listening for server-push from this peer
+        // Start listening for server-push from this peer.
+        // When the stream ends (peer disconnected), attempt reconnection.
+        let peerIDCopy = handshakeReply.peerID
+        let peerNameCopy = handshakeReply.peerName
         Task {
             for await push in client.pushes {
-                await self.handlePeerPush(push, from: handshakeReply.peerID)
+                await self.handlePeerPush(push, from: peerIDCopy)
             }
+            // Stream ended — peer disconnected
+            await self.handlePeerDisconnect(peerID: peerIDCopy, peerName: peerNameCopy, host: host, port: port)
         }
 
         // Initial sync: exchange manifests and reconcile
         try await reconcileWithPeer(connection)
+    }
+
+    private func handlePeerDisconnect(peerID: String, peerName: String, host: String, port: Int) {
+        peers.removeValue(forKey: peerID)
+        logger.warning("Peer disconnected: \(peerName) (\(peerID))")
+
+        // Retry reconnection with backoff
+        Task {
+            var delay: UInt64 = 2_000_000_000 // 2s
+            let maxDelay: UInt64 = 30_000_000_000 // 30s
+            let maxAttempts = 10
+
+            for attempt in 1...maxAttempts {
+                try? await Task.sleep(nanoseconds: delay)
+                guard !Task.isCancelled else { return }
+
+                // Already reconnected (e.g., reverse-pair from the other side)
+                if hasPeer(peerID) {
+                    logger.info("Peer \(peerName) already reconnected")
+                    return
+                }
+
+                logger.info("Reconnecting to \(peerName) (attempt \(attempt)/\(maxAttempts))...")
+                do {
+                    try await addPeer(host: host, port: port)
+                    logger.info("Reconnected to \(peerName)")
+                    return
+                } catch {
+                    logger.debug("Reconnect failed: \(error)")
+                    delay = min(delay * 2, maxDelay)
+                }
+            }
+            logger.warning("Gave up reconnecting to \(peerName) after \(maxAttempts) attempts")
+        }
     }
 
     // MARK: - Sync logic
@@ -288,6 +327,20 @@ actor SyncDaemon {
 
         // Mark as sync-written so FileWatcher ignores it
         recentSyncWrites[relativePath] = Date()
+    }
+
+    func deleteFile(relativePath: String) -> Bool {
+        let fullPath = (syncDirectory as NSString).appendingPathComponent(relativePath)
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: fullPath) else { return false }
+        do {
+            try fm.removeItem(atPath: fullPath)
+            recentSyncWrites[relativePath] = Date()
+            return true
+        } catch {
+            logger.error("Failed to delete \(relativePath): \(error)")
+            return false
+        }
     }
 
     func localPeerInfo() -> (peerID: String, peerName: String, version: String) {
@@ -378,16 +431,16 @@ actor SyncDaemon {
         for (_, peer) in peers {
             do {
                 if change.kind == .deleted {
-                    // Just notify deletion
-                    let argData = try JSONEncoder().encode(body)
-                    let eventBody = CallBody(
+                    let deleteBody = FileDeleteBody(path: change.path)
+                    let argData = try JSONEncoder().encode(deleteBody)
+                    let callBody = CallBody(
                         namespace: "orbital-sync",
                         service: "sync",
-                        method: "sync.file.changed",
+                        method: SyncMethod.fileDelete,
                         arguments: [EncodedArgument(key: "body", value: argData)]
                     )
-                    let matter = try Matter.make(type: .event, body: eventBody)
-                    peer.client.fire(matter: matter)
+                    let matter = try Matter.make(type: .call, body: callBody)
+                    _ = try await peer.client.request(matter: matter)
                 } else {
                     // Push the file
                     let fileData = try readFile(relativePath: change.path)

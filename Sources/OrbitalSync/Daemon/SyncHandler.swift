@@ -30,6 +30,8 @@ struct SyncHandler: NMTHandler {
             return try await handleFilePull(matter: matter, body: body)
         case SyncMethod.filePush:
             return try await handleFilePush(matter: matter, body: body)
+        case SyncMethod.fileDelete:
+            return try await handleFileDelete(matter: matter, body: body)
         default:
             logger.warning("Unknown sync method: \(body.method)")
             return try matter.reply(body: CallReplyBody(result: nil, error: "Unknown method: \(body.method)"))
@@ -107,6 +109,14 @@ struct SyncHandler: NMTHandler {
         let request = try decodeArgument(FilePushBody.self, from: body)
         try await daemon.writeFile(relativePath: request.path, content: request.content, modifiedAt: request.modifiedAt)
         let reply = FilePushReplyBody(accepted: true)
+        return try matter.reply(body: encodeReply(reply))
+    }
+
+    private func handleFileDelete(matter: Matter, body: CallBody) async throws -> Matter? {
+        let request = try decodeArgument(FileDeleteBody.self, from: body)
+        logger.info("Delete request: \(request.path)")
+        let deleted = await daemon.deleteFile(relativePath: request.path)
+        let reply = FileDeleteReplyBody(deleted: deleted)
         return try matter.reply(body: encodeReply(reply))
     }
 

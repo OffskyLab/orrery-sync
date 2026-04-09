@@ -51,6 +51,16 @@ struct FilePushReplyBody: Codable, Sendable {
     let accepted: Bool
 }
 
+// MARK: - File delete
+
+struct FileDeleteBody: Codable, Sendable {
+    let path: String
+}
+
+struct FileDeleteReplyBody: Codable, Sendable {
+    let deleted: Bool
+}
+
 // MARK: - File change notification (server-push via .event)
 
 struct FileChangedBody: Codable, Sendable {
