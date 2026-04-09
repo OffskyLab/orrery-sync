@@ -136,16 +136,14 @@ orbital-sync daemon --port 9527 --rendezvous rv.company.com:9600
 
 ## What gets synced
 
-Everything under `~/.orbital/shared/`:
+Only memory files under `~/.orbital/shared/memory/`:
 
 | Path | Content | Sync behavior |
 |------|---------|---------------|
-| `claude/projects/` | Session files (JSONL) | Append merge |
-| `claude/sessions/` | Session metadata | Last-write-wins |
 | `memory/*/ORBITAL_MEMORY.md` | Shared memory | Via fragments |
 | `memory/*/fragments/` | Memory fragments | Conflict-free sync |
-| `codex/sessions/` | Codex sessions | Append merge |
-| `gemini/tmp/` | Gemini sessions | Last-write-wins |
+
+Sessions (`claude/`, `codex/`, `gemini/`) are **not synced** — they are machine-specific (bound to local paths and environment accounts) and not useful across peers.
 
 ### Memory fragment workflow
 

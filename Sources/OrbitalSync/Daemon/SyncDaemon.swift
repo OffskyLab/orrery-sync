@@ -297,15 +297,20 @@ actor SyncDaemon {
 
     // MARK: - Sync logic
 
+    /// Only sync memory — sessions are machine-specific and not useful across peers.
+    private static let syncPrefix = "memory/"
+
     func buildManifest() -> SyncManifest {
         let fm = FileManager.default
         var entries: [SyncManifest.Entry] = []
 
-        guard let enumerator = fm.enumerator(atPath: syncDirectory) else {
+        let memoryDir = (syncDirectory as NSString).appendingPathComponent("memory")
+        guard let enumerator = fm.enumerator(atPath: memoryDir) else {
             return SyncManifest(peerID: peerID, timestamp: Date(), entries: [])
         }
 
-        while let relativePath = enumerator.nextObject() as? String {
+        while let subPath = enumerator.nextObject() as? String {
+            let relativePath = Self.syncPrefix + subPath
             let fullPath = (syncDirectory as NSString).appendingPathComponent(relativePath)
             var isDir: ObjCBool = false
             guard fm.fileExists(atPath: fullPath, isDirectory: &isDir), !isDir.boolValue else { continue }
@@ -440,6 +445,9 @@ actor SyncDaemon {
     }
 
     private func handleFileChange(_ change: FileChange) async {
+        // Only sync memory files
+        guard change.path.hasPrefix(Self.syncPrefix) else { return }
+
         // Skip files recently written by sync to avoid ping-pong loops
         if let writeTime = recentSyncWrites[change.path],
            Date().timeIntervalSince(writeTime) < 2.0 {
