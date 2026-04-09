@@ -7,6 +7,8 @@ struct DaemonCommand: AsyncParsableCommand {
         abstract: "Start the sync daemon"
     )
 
+    @OptionGroup var globals: OrbitalSyncCommand
+
     @Option(name: .shortAndLong, help: "Port for NMT server")
     var port: Int = 9527
 
@@ -15,10 +17,12 @@ struct DaemonCommand: AsyncParsableCommand {
 
     func run() async throws {
         let dir = syncDir ?? defaultSyncDirectory()
+        let socketPath = resolveSocketPath(from: globals.socket)
         print("Starting orbital-sync daemon on port \(port)")
         print("Sync directory: \(dir)")
+        print("Control socket: \(socketPath)")
 
-        let daemon = SyncDaemon(port: port, syncDirectory: dir)
+        let daemon = SyncDaemon(port: port, syncDirectory: dir, socketPath: socketPath)
         try await daemon.start()
     }
 

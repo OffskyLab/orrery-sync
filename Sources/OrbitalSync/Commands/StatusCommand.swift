@@ -6,8 +6,11 @@ struct StatusCommand: AsyncParsableCommand {
         abstract: "Show daemon and peer status"
     )
 
+    @OptionGroup var globals: OrbitalSyncCommand
+
     func run() async throws {
-        let client = ControlClient()
+        let socketPath = resolveSocketPath(from: globals.socket)
+        let client = ControlClient(socketPath: socketPath)
         do {
             let response = try client.send(ControlRequest(command: "status", args: nil))
             if response.ok {

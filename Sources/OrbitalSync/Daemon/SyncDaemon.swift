@@ -7,6 +7,7 @@ import Logging
 actor SyncDaemon {
     let port: Int
     let syncDirectory: String
+    let socketPath: String
     let peerID: String
     let logger = Logger(label: "orbital-sync")
 
@@ -17,9 +18,10 @@ actor SyncDaemon {
 
     static let version = "0.1.0"
 
-    init(port: Int, syncDirectory: String) {
+    init(port: Int, syncDirectory: String, socketPath: String) {
         self.port = port
         self.syncDirectory = syncDirectory
+        self.socketPath = socketPath
         self.peerID = UUID().uuidString
     }
 
@@ -40,7 +42,7 @@ actor SyncDaemon {
 
         // 2. Start control socket for CLI commands
         let daemonRef = self
-        let socket = ControlSocket { request in
+        let socket = ControlSocket(socketPath: socketPath) { request in
             await daemonRef.handleControl(request)
         }
         self.controlSocket = socket

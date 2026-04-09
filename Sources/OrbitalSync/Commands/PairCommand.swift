@@ -6,6 +6,8 @@ struct PairCommand: AsyncParsableCommand {
         abstract: "Pair with a remote peer"
     )
 
+    @OptionGroup var globals: OrbitalSyncCommand
+
     @Argument(help: "Remote peer address (host:port)")
     var address: String
 
@@ -17,7 +19,8 @@ struct PairCommand: AsyncParsableCommand {
         }
         let host = String(parts[0])
 
-        let client = ControlClient()
+        let socketPath = resolveSocketPath(from: globals.socket)
+        let client = ControlClient(socketPath: socketPath)
         do {
             let response = try client.send(ControlRequest(
                 command: "pair",

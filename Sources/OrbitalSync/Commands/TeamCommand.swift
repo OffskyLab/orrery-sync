@@ -10,6 +10,8 @@ struct TeamCommand: AsyncParsableCommand {
             TeamJoinCommand.self,
         ]
     )
+
+    @OptionGroup var globals: OrbitalSyncCommand
 }
 
 struct TeamCreateCommand: AsyncParsableCommand {
@@ -17,6 +19,8 @@ struct TeamCreateCommand: AsyncParsableCommand {
         commandName: "create",
         abstract: "Create a new team"
     )
+
+    @OptionGroup var globals: OrbitalSyncCommand
 
     @Argument(help: "Team name")
     var name: String
@@ -33,6 +37,8 @@ struct TeamInviteCommand: AsyncParsableCommand {
         abstract: "Generate an invite code for a peer"
     )
 
+    @OptionGroup var globals: OrbitalSyncCommand
+
     func run() async throws {
         // TODO: Generate invite code containing team ID + secret + host info
         print("Generating invite code...")
@@ -44,6 +50,8 @@ struct TeamJoinCommand: AsyncParsableCommand {
         commandName: "join",
         abstract: "Join a team using an invite code"
     )
+
+    @OptionGroup var globals: OrbitalSyncCommand
 
     @Argument(help: "Invite code")
     var code: String
