@@ -15,6 +15,8 @@ actor SyncDaemon {
     private var peers: [String: PeerConnection] = [:]
     private var controlSocket: ControlSocket?
     private var fileWatchTask: Task<Void, Never>?
+    /// Paths recently written by sync — skip these in FileWatcher to avoid ping-pong loops.
+    private var recentSyncWrites: [String: Date] = [:]
 
     static let version = "0.1.0"
 
@@ -220,6 +222,9 @@ actor SyncDaemon {
             [.modificationDate: modifiedAt],
             ofItemAtPath: fullPath
         )
+
+        // Mark as sync-written so FileWatcher ignores it
+        recentSyncWrites[relativePath] = Date()
     }
 
     func localPeerInfo() -> (peerID: String, peerName: String, version: String) {
@@ -287,6 +292,15 @@ actor SyncDaemon {
     }
 
     private func handleFileChange(_ change: FileChange) async {
+        // Skip files recently written by sync to avoid ping-pong loops
+        if let writeTime = recentSyncWrites[change.path],
+           Date().timeIntervalSince(writeTime) < 2.0 {
+            return
+        }
+        let now = Date()
+        let staleKeys = recentSyncWrites.filter { now.timeIntervalSince($0.value) > 5.0 }.map(\.key)
+        for key in staleKeys { recentSyncWrites.removeValue(forKey: key) }
+
         logger.info("File changed: \(change.kind) \(change.path), peers: \(peers.count)")
 
         let entry = FileChangeEntry(
