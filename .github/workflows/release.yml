@@ -1,0 +1,172 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos-arm64:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: swift build -c release
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp .build/release/orbital-sync dist/orbital-sync
+          chmod +x dist/orbital-sync
+          tar -czf orbital-sync-darwin-arm64.tar.gz -C dist orbital-sync
+      - uses: actions/upload-artifact@v4
+        with:
+          name: orbital-sync-darwin-arm64
+          path: orbital-sync-darwin-arm64.tar.gz
+
+  build-linux-x86_64:
+    runs-on: ubuntu-latest
+    container: swift:6.0-jammy
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: swift build -c release --static-swift-stdlib
+      - name: Package tar.gz
+        run: |
+          mkdir -p dist
+          cp .build/release/orbital-sync dist/orbital-sync
+          chmod +x dist/orbital-sync
+          tar -czf orbital-sync-linux-x86_64.tar.gz -C dist orbital-sync
+      - name: Package deb
+        run: |
+          tag="${GITHUB_REF#refs/tags/v}"
+          mkdir -p deb/DEBIAN deb/usr/local/bin
+          cp .build/release/orbital-sync deb/usr/local/bin/orbital-sync
+          chmod +x deb/usr/local/bin/orbital-sync
+          cat > deb/DEBIAN/control <<CTRL
+          Package: orbital-sync
+          Version: ${tag}
+          Architecture: amd64
+          Maintainer: OffskyLab <offskylab@users.noreply.github.com>
+          Description: P2P real-time sync daemon for Orbital
+          CTRL
+          sed -i 's/^          //' deb/DEBIAN/control
+          dpkg-deb --build deb orbital-sync_${tag}_amd64.deb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: orbital-sync-linux-x86_64
+          path: |
+            orbital-sync-linux-x86_64.tar.gz
+            orbital-sync_*_amd64.deb
+
+  build-linux-arm64:
+    runs-on: ubuntu-24.04-arm
+    container: swift:6.0-jammy
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: swift build -c release --static-swift-stdlib
+      - name: Package tar.gz
+        run: |
+          mkdir -p dist
+          cp .build/release/orbital-sync dist/orbital-sync
+          chmod +x dist/orbital-sync
+          tar -czf orbital-sync-linux-arm64.tar.gz -C dist orbital-sync
+      - name: Package deb
+        run: |
+          tag="${GITHUB_REF#refs/tags/v}"
+          mkdir -p deb/DEBIAN deb/usr/local/bin
+          cp .build/release/orbital-sync deb/usr/local/bin/orbital-sync
+          chmod +x deb/usr/local/bin/orbital-sync
+          cat > deb/DEBIAN/control <<CTRL
+          Package: orbital-sync
+          Version: ${tag}
+          Architecture: arm64
+          Maintainer: OffskyLab <offskylab@users.noreply.github.com>
+          Description: P2P real-time sync daemon for Orbital
+          CTRL
+          sed -i 's/^          //' deb/DEBIAN/control
+          dpkg-deb --build deb orbital-sync_${tag}_arm64.deb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: orbital-sync-linux-arm64
+          path: |
+            orbital-sync-linux-arm64.tar.gz
+            orbital-sync_*_arm64.deb
+
+  release:
+    needs: [build-macos-arm64, build-linux-x86_64, build-linux-arm64]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          gh release create "$tag" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$tag" \
+            --generate-notes \
+            artifacts/orbital-sync-darwin-arm64/orbital-sync-darwin-arm64.tar.gz \
+            artifacts/orbital-sync-linux-x86_64/orbital-sync-linux-x86_64.tar.gz \
+            artifacts/orbital-sync-linux-x86_64/orbital-sync_*_amd64.deb \
+            artifacts/orbital-sync-linux-arm64/orbital-sync-linux-arm64.tar.gz \
+            artifacts/orbital-sync-linux-arm64/orbital-sync_*_arm64.deb
+
+  update-apt:
+    needs: [release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Checkout APT repo
+        uses: actions/checkout@v4
+        with:
+          repository: OffskyLab/apt
+          token: ${{ secrets.APT_REPO_TOKEN }}
+          path: apt-repo
+
+      - name: Update APT repo
+        run: |
+          mkdir -p apt-repo/pool/main/o/orbital-sync
+          cp artifacts/orbital-sync-linux-x86_64/orbital-sync_*_amd64.deb apt-repo/pool/main/o/orbital-sync/
+          cp artifacts/orbital-sync-linux-arm64/orbital-sync_*_arm64.deb apt-repo/pool/main/o/orbital-sync/
+
+          cd apt-repo
+          dpkg-scanpackages --arch amd64 pool/ > dists/stable/main/binary-amd64/Packages
+          dpkg-scanpackages --arch arm64 pool/ > dists/stable/main/binary-arm64/Packages
+          mkdir -p dists/stable/main/binary-i386
+          touch dists/stable/main/binary-i386/Packages
+          gzip -kf dists/stable/main/binary-amd64/Packages
+          gzip -kf dists/stable/main/binary-arm64/Packages
+          gzip -kf dists/stable/main/binary-i386/Packages
+
+          cd dists/stable
+          cat > Release <<RELEASE
+          Origin: OffskyLab
+          Label: Orbital
+          Suite: stable
+          Codename: stable
+          Architectures: amd64 arm64 i386
+          Components: main
+          Description: APT repository for Orbital
+          RELEASE
+          sed -i 's/^          //' Release
+          apt-ftparchive release . >> Release
+
+      - name: Push APT repo
+        run: |
+          cd apt-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet || git commit -m "[UPDATE] orbital-sync $(echo ${GITHUB_REF#refs/tags/})"
+          git push
