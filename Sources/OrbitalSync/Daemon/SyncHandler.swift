@@ -40,6 +40,20 @@ struct SyncHandler: NMTHandler {
         let request = try decodeArgument(HandshakeBody.self, from: body)
         logger.info("Handshake from \(request.peerName) (\(request.peerID))")
 
+        // Validate team membership if configured
+        let config = SyncConfig.load()
+        if let team = config.team, let remoteTeam = request.teamID {
+            if team.id != remoteTeam {
+                logger.warning("Rejected handshake: team mismatch")
+                let info = await daemon.localPeerInfo()
+                let reply = HandshakeReplyBody(
+                    peerID: info.peerID, peerName: info.peerName,
+                    version: info.version, accepted: false
+                )
+                return try matter.reply(body: encodeReply(reply))
+            }
+        }
+
         // Resolve the remote peer's IP from the channel
         let remoteHost: String
         if let remoteAddress = channel.remoteAddress {
@@ -54,7 +68,7 @@ struct SyncHandler: NMTHandler {
             logger.info("Reverse-pairing to \(request.peerName) at \(remoteHost):\(request.port)")
             Task {
                 do {
-                    try await daemon.addPeer(host: remoteHost, port: request.port, skipHandshake: false)
+                    try await daemon.addPeer(host: remoteHost, port: request.port)
                 } catch {
                     logger.error("Reverse-pair failed: \(error)")
                 }
@@ -117,4 +131,6 @@ enum SyncError: Error {
     case missingArgument
     case fileNotFound(String)
     case daemonNotRunning
+    case invalidInviteCode
+    case noTeamConfigured
 }

@@ -75,9 +75,23 @@ actor SyncDaemon {
             }
         }
 
+        // 4. Auto-connect to known peers from config
+        let config = SyncConfig.load()
+        if config.team != nil {
+            for peer in config.knownPeers {
+                Task {
+                    do {
+                        try await daemonRef.addPeer(host: peer.host, port: peer.port)
+                    } catch {
+                        logger.warning("Failed to connect to known peer \(peer.host):\(peer.port): \(error)")
+                    }
+                }
+            }
+        }
+
         logger.info("Daemon ready")
 
-        // 4. Block until terminated
+        // 5. Block until terminated
         try await server?.listen()
     }
 
@@ -104,12 +118,13 @@ actor SyncDaemon {
 
         // Handshake
         let info = localPeerInfo()
+        let config = SyncConfig.load()
         let handshakeBody = HandshakeBody(
             peerID: info.peerID,
             peerName: info.peerName,
             version: info.version,
             port: self.port,
-            teamID: nil
+            teamID: config.team?.id
         )
         let argData = try JSONEncoder().encode(handshakeBody)
         let callBody = CallBody(
@@ -149,6 +164,20 @@ actor SyncDaemon {
         )
         peers[handshakeReply.peerID] = connection
         logger.info("Paired with \(handshakeReply.peerName) (\(handshakeReply.peerID))")
+
+        // Save to known peers for auto-reconnect
+        var cfg = SyncConfig.load()
+        let alreadyKnown = cfg.knownPeers.contains { $0.host == host && $0.port == port }
+        if !alreadyKnown {
+            cfg.knownPeers.append(KnownPeer(
+                peerID: handshakeReply.peerID,
+                peerName: handshakeReply.peerName,
+                host: host,
+                port: port,
+                addedAt: Date()
+            ))
+            try? cfg.save()
+        }
 
         // Start listening for server-push from this peer
         Task {
