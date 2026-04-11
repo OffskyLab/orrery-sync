@@ -1,5 +1,6 @@
 import Foundation
 import NMTP
+import NMTPeer
 import NIO
 import Logging
 import Crypto
@@ -8,7 +9,7 @@ import Crypto
 import Network
 #endif
 
-/// Core daemon that manages NMT server, peer connections, file watching, and control socket.
+/// Core daemon that manages peer listener, peer connections, file watching, and control socket.
 actor SyncDaemon {
     let port: Int
     let syncDirectory: String
@@ -18,12 +19,12 @@ actor SyncDaemon {
     let rendezvousAddress: String?
     let logger = Logger(label: "orbital-sync")
 
-    private var server: NMTServer?
+    private var peerListener: PeerListener?
     private var peers: [String: PeerConnection] = [:]
     private var controlSocket: ControlSocket?
     private var fileWatchTask: Task<Void, Never>?
-    /// Paths recently written by sync — skip these in FileWatcher to avoid ping-pong loops.
     private var recentSyncWrites: [String: Date] = [:]
+    private var isStopping = false
     #if canImport(Network)
     private var discovery: BonjourDiscovery?
     #endif
@@ -33,7 +34,6 @@ actor SyncDaemon {
 
     init(port: Int, syncDirectory: String, socketPath: String, tls: SyncTLSContext? = nil, rendezvousAddress: String? = nil) {
         self.port = port
-        // Resolve symlinks (e.g. /tmp → /private/tmp on macOS)
         self.syncDirectory = Self.resolveRealPath(syncDirectory)
         self.socketPath = socketPath
         self.peerID = UUID().uuidString
@@ -42,7 +42,6 @@ actor SyncDaemon {
     }
 
     private static func resolveRealPath(_ path: String) -> String {
-        // Ensure parent exists so realpath can resolve
         let fm = FileManager.default
         try? fm.createDirectory(atPath: path, withIntermediateDirectories: true)
         if let resolved = realpath(path, nil) {
@@ -53,10 +52,15 @@ actor SyncDaemon {
         return path
     }
 
+    // MARK: - Testability helpers
+
+    var connectedPeerCount: Int { peers.count }
+
+    func firstPeer() -> PeerConnection? { peers.values.first }
+
     // MARK: - Lifecycle
 
     func start() async throws {
-        // Ensure sync directory exists
         try FileManager.default.createDirectory(atPath: syncDirectory, withIntermediateDirectories: true)
 
         logger.info("Starting daemon", metadata: [
@@ -65,13 +69,13 @@ actor SyncDaemon {
             "syncDir": "\(syncDirectory)",
         ])
 
-        // 1. Start NMT server for peer connections
-        let handler = SyncHandler(daemon: self)
+        // 1. Bind peer listener
         let address = try SocketAddress(ipAddress: "0.0.0.0", port: port)
-        server = try await NMTServer.bind(on: address, handler: handler, tls: tls)
-        logger.info("NMT server bound on port \(port)")
+        let listener = try await PeerListener.bind(on: address, tls: tls)
+        self.peerListener = listener
+        logger.info("Peer listener bound on port \(port)")
 
-        // 2. Start control socket for CLI commands
+        // 2. Start control socket
         let daemonRef = self
         let socket = ControlSocket(socketPath: socketPath) { request in
             await daemonRef.handleControl(request)
@@ -88,7 +92,7 @@ actor SyncDaemon {
             }
         }
 
-        // 4. Auto-connect to known peers from config
+        // 4. Auto-connect to known peers
         let config = SyncConfig.load()
         if config.team != nil {
             for peer in config.knownPeers {
@@ -102,7 +106,7 @@ actor SyncDaemon {
             }
         }
 
-        // 5. Start mDNS discovery (macOS only)
+        // 5. mDNS discovery (macOS only)
         #if canImport(Network)
         let info = localPeerInfo()
         let disc = BonjourDiscovery(
@@ -122,22 +126,21 @@ actor SyncDaemon {
         self.discovery = disc
         #endif
 
-        // 6. Register with rendezvous server (cross-network discovery)
+        // 6. Rendezvous registration
         if let rvAddr = rendezvousAddress, let team = config.team {
             let parts = rvAddr.split(separator: ":")
             if parts.count == 2, let rvPort = Int(parts[1]) {
                 let rvHost = String(parts[0])
                 let rv = RendezvousClient(host: rvHost, port: rvPort)
                 self.rvClient = rv
-
                 Task {
                     do {
                         let info = await daemonRef.localPeerInfo()
-                        let peers = try await rv.register(
+                        let rvPeers = try await rv.register(
                             peerID: peerID, peerName: info.peerName,
                             teamID: team.id, host: "", port: port
                         )
-                        for rvPeer in peers {
+                        for rvPeer in rvPeers {
                             let alreadyPaired = await daemonRef.hasPeer(rvPeer.peerID)
                             if !alreadyPaired {
                                 try await daemonRef.addPeer(host: rvPeer.host, port: rvPeer.port)
@@ -152,11 +155,19 @@ actor SyncDaemon {
 
         logger.info("Daemon ready")
 
-        // 7. Block until terminated
-        try await server?.listen()
+        // 7. Accept loop — blocks until peerListener.close() is called
+        for await peer in listener.peers {
+            let dispatcher = PeerDispatcher(peer: peer)
+            registerSyncHandlers(on: dispatcher)
+            Task { [weak self] in
+                try? await dispatcher.run()
+                await self?.handleListenerPeerDisconnect(dispatcher: dispatcher)
+            }
+        }
     }
 
     func stop() async throws {
+        isStopping = true
         await rvClient?.disconnect()
         #if canImport(Network)
         await discovery?.stopBrowsing()
@@ -164,11 +175,11 @@ actor SyncDaemon {
         #endif
         fileWatchTask?.cancel()
         for (_, peer) in peers {
-            try await peer.client.close()
+            try? await peer.dispatcher.peer.close()
         }
         peers.removeAll()
         try await controlSocket?.stop()
-        try await server?.stop()
+        try await peerListener?.close()
         logger.info("Daemon stopped")
     }
 
@@ -178,112 +189,114 @@ actor SyncDaemon {
         peers[peerID] != nil
     }
 
-    func addPeer(host: String, port: Int, skipHandshake: Bool = false) async throws {
-        let address = try SocketAddress(ipAddress: host, port: port)
-        let client = try await NMTClient.connect(to: address, tls: tls)
+    func storePeer(_ connection: PeerConnection) {
+        peers[connection.peerID] = connection
+        logger.info("Paired with \(connection.peerName) (\(connection.peerID))")
+    }
 
-        // Handshake
+    func addPeer(host: String, port: Int) async throws {
+        let address = try SocketAddress(ipAddress: host, port: port)
+        let dispatcher = try await PeerDispatcher.connect(to: address, tls: tls)
+        registerSyncHandlers(on: dispatcher)
+
+        // Start run() BEFORE sending any request — ensures replies are routed
+        let runTask = Task {
+            try? await dispatcher.run()
+        }
+
         let info = localPeerInfo()
         let config = SyncConfig.load()
-        let handshakeBody = HandshakeBody(
-            peerID: info.peerID,
-            peerName: info.peerName,
-            version: info.version,
-            port: self.port,
-            teamID: config.team?.id
-        )
-        let argData = try JSONEncoder().encode(handshakeBody)
-        let callBody = CallBody(
-            namespace: "orbital-sync",
-            service: "sync",
-            method: SyncMethod.handshake,
-            arguments: [EncodedArgument(key: "body", value: argData)]
-        )
-        let request = try Matter.make(type: .call, body: callBody)
-        let response = try await client.request(matter: request)
-        let reply = try response.decodeBody(CallReplyBody.self)
-
-        guard let resultData = reply.result else {
-            throw SyncError.missingArgument
+        let reply: SyncHandshakeReply
+        do {
+            reply = try await dispatcher.request(
+                SyncHandshake(
+                    peerID: info.peerID, peerName: info.peerName,
+                    version: info.version, port: self.port, teamID: config.team?.id
+                ),
+                expecting: SyncHandshakeReply.self
+            )
+        } catch {
+            runTask.cancel()
+            try? await dispatcher.peer.close()
+            throw error
         }
-        let handshakeReply = try JSONDecoder().decode(HandshakeReplyBody.self, from: resultData)
 
-        guard handshakeReply.accepted else {
-            try await client.close()
+        guard reply.accepted else {
+            runTask.cancel()
+            try? await dispatcher.peer.close()
             logger.warning("Peer rejected handshake: \(host):\(port)")
-            return
+            throw SyncError.handshakeRejected
         }
 
-        // Skip if already paired (prevents infinite reverse-pair loop)
-        guard !hasPeer(handshakeReply.peerID) else {
-            try await client.close()
-            logger.debug("Already paired with \(handshakeReply.peerName), skipping")
+        guard !hasPeer(reply.peerID) else {
+            runTask.cancel()
+            try? await dispatcher.peer.close()
+            logger.debug("Already paired with \(reply.peerName), skipping")
             return
         }
 
         let connection = PeerConnection(
-            peerID: handshakeReply.peerID,
-            peerName: handshakeReply.peerName,
-            address: host,
-            port: port,
-            client: client
+            peerID: reply.peerID, peerName: reply.peerName,
+            address: host, port: port,
+            dispatcher: dispatcher, isInitiator: true
         )
-        peers[handshakeReply.peerID] = connection
-        logger.info("Paired with \(handshakeReply.peerName) (\(handshakeReply.peerID))")
+        peers[reply.peerID] = connection
+        logger.info("Paired with \(reply.peerName) (\(reply.peerID))")
 
         // Save to known peers for auto-reconnect
         var cfg = SyncConfig.load()
         let alreadyKnown = cfg.knownPeers.contains { $0.host == host && $0.port == port }
         if !alreadyKnown {
             cfg.knownPeers.append(KnownPeer(
-                peerID: handshakeReply.peerID,
-                peerName: handshakeReply.peerName,
-                host: host,
-                port: port,
-                addedAt: Date()
+                peerID: reply.peerID, peerName: reply.peerName,
+                host: host, port: port, addedAt: Date()
             ))
             try? cfg.save()
         }
 
-        // Start listening for server-push from this peer.
-        // When the stream ends (peer disconnected), attempt reconnection.
-        let peerIDCopy = handshakeReply.peerID
-        let peerNameCopy = handshakeReply.peerName
+        let remotePeerID = reply.peerID
+        let remotePeerName = reply.peerName
+        // When runTask finishes, the peer has disconnected
         Task {
-            for await push in client.pushes {
-                await self.handlePeerPush(push, from: peerIDCopy)
-            }
-            // Stream ended — peer disconnected
-            await self.handlePeerDisconnect(peerID: peerIDCopy, peerName: peerNameCopy, host: host, port: port)
+            await runTask.value
+            await self.handlePeerDisconnect(
+                peerID: remotePeerID, peerName: remotePeerName,
+                host: host, port: port, isInitiator: true
+            )
         }
 
-        // Initial sync: exchange manifests and reconcile
         try await reconcileWithPeer(connection)
     }
 
-    private func handlePeerDisconnect(peerID: String, peerName: String, host: String, port: Int) {
+    private func handleListenerPeerDisconnect(dispatcher: PeerDispatcher) {
+        guard !isStopping else { return }
+        guard let peerID = peers.first(where: { $0.value.dispatcher === dispatcher })?.key else { return }
+        let peerName = peers[peerID]?.peerName ?? peerID
+        peers.removeValue(forKey: peerID)
+        logger.info("Listener peer disconnected: \(peerName) (\(peerID)) — no retry")
+    }
+
+    private func handlePeerDisconnect(peerID: String, peerName: String, host: String, port: Int, isInitiator: Bool) {
+        guard !isStopping else { return }
         peers.removeValue(forKey: peerID)
         logger.warning("Peer disconnected: \(peerName) (\(peerID))")
+        guard isInitiator else { return }
 
-        // Retry reconnection with backoff
         Task {
-            var delay: UInt64 = 2_000_000_000 // 2s
-            let maxDelay: UInt64 = 30_000_000_000 // 30s
+            var delay: UInt64 = 2_000_000_000
+            let maxDelay: UInt64 = 30_000_000_000
             let maxAttempts = 10
-
             for attempt in 1...maxAttempts {
-                try? await Task.sleep(nanoseconds: delay)
                 guard !Task.isCancelled else { return }
-
-                // Already reconnected (e.g., reverse-pair from the other side)
-                if hasPeer(peerID) {
+                if await self.isStopping { return }
+                try? await Task.sleep(nanoseconds: delay)
+                if await self.hasPeer(peerID) {
                     logger.info("Peer \(peerName) already reconnected")
                     return
                 }
-
                 logger.info("Reconnecting to \(peerName) (attempt \(attempt)/\(maxAttempts))...")
                 do {
-                    try await addPeer(host: host, port: port)
+                    try await self.addPeer(host: host, port: port)
                     logger.info("Reconnected to \(peerName)")
                     return
                 } catch {
@@ -295,40 +308,83 @@ actor SyncDaemon {
         }
     }
 
+    // MARK: - Handler registration
+
+    nonisolated func registerSyncHandlers(on dispatcher: PeerDispatcher) {
+        dispatcher.register(SyncHandshake.self) { [weak self, dispatcher] msg, _ in
+            guard let self else { return nil }
+            let config = SyncConfig.load()
+            if let team = config.team, let remoteTeam = msg.teamID, team.id != remoteTeam {
+                let info = await self.localPeerInfo()
+                return SyncHandshakeReply(
+                    peerID: info.peerID, peerName: info.peerName,
+                    version: info.version, accepted: false
+                )
+            }
+            let host = dispatcher.peer.remoteAddress.ipAddress ?? "127.0.0.1"
+            let info = await self.localPeerInfo()
+            let connection = PeerConnection(
+                peerID: msg.peerID, peerName: msg.peerName,
+                address: host, port: msg.port,
+                dispatcher: dispatcher, isInitiator: false
+            )
+            await self.storePeer(connection)
+            return SyncHandshakeReply(
+                peerID: info.peerID, peerName: info.peerName,
+                version: info.version, accepted: true
+            )
+        }
+
+        dispatcher.register(SyncManifestRequest.self) { [weak self] _, _ in
+            guard let self else { return nil }
+            let manifest = await self.buildManifest()
+            return SyncManifestReply(manifest: manifest)
+        }
+
+        dispatcher.register(SyncFilePull.self) { [weak self] msg, _ in
+            guard let self else { return nil }
+            let fileData = try await self.readFile(relativePath: msg.path)
+            return SyncFilePullReply(
+                path: msg.path, content: fileData.content,
+                hash: fileData.hash, modifiedAt: fileData.modifiedAt
+            )
+        }
+
+        dispatcher.register(SyncFilePush.self) { [weak self] msg, _ in
+            guard let self else { return nil }
+            try await self.writeFile(relativePath: msg.path, content: msg.content, modifiedAt: msg.modifiedAt)
+            return SyncFilePushReply(accepted: true)
+        }
+
+        dispatcher.register(SyncFileDelete.self) { [weak self] msg, _ in
+            guard let self else { return nil }
+            let deleted = await self.deleteFile(relativePath: msg.path)
+            return SyncFileDeleteReply(deleted: deleted)
+        }
+    }
+
     // MARK: - Sync logic
 
-    /// Only sync memory — sessions are machine-specific and not useful across peers.
     private static let syncPrefix = "memory/"
 
     func buildManifest() -> SyncManifest {
         let fm = FileManager.default
         var entries: [SyncManifest.Entry] = []
-
         let memoryDir = (syncDirectory as NSString).appendingPathComponent("memory")
         guard let enumerator = fm.enumerator(atPath: memoryDir) else {
             return SyncManifest(peerID: peerID, timestamp: Date(), entries: [])
         }
-
         while let subPath = enumerator.nextObject() as? String {
             let relativePath = Self.syncPrefix + subPath
             let fullPath = (syncDirectory as NSString).appendingPathComponent(relativePath)
             var isDir: ObjCBool = false
             guard fm.fileExists(atPath: fullPath, isDirectory: &isDir), !isDir.boolValue else { continue }
-
             guard let attrs = try? fm.attributesOfItem(atPath: fullPath),
                   let size = attrs[.size] as? UInt64,
                   let modified = attrs[.modificationDate] as? Date else { continue }
-
             let hash = computeHash(of: fullPath)
-
-            entries.append(SyncManifest.Entry(
-                path: relativePath,
-                hash: hash,
-                size: size,
-                modifiedAt: modified
-            ))
+            entries.append(SyncManifest.Entry(path: relativePath, hash: hash, size: size, modifiedAt: modified))
         }
-
         return SyncManifest(peerID: peerID, timestamp: Date(), entries: entries)
     }
 
@@ -355,14 +411,7 @@ actor SyncDaemon {
         let dir = (fullPath as NSString).deletingLastPathComponent
         try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         try content.write(to: URL(fileURLWithPath: fullPath))
-
-        // Preserve original modification time
-        try FileManager.default.setAttributes(
-            [.modificationDate: modifiedAt],
-            ofItemAtPath: fullPath
-        )
-
-        // Mark as sync-written so FileWatcher ignores it
+        try FileManager.default.setAttributes([.modificationDate: modifiedAt], ofItemAtPath: fullPath)
         recentSyncWrites[relativePath] = Date()
     }
 
@@ -389,26 +438,12 @@ actor SyncDaemon {
 
     private func reconcileWithPeer(_ peer: PeerConnection) async throws {
         let localManifest = buildManifest()
-
-        // Request remote manifest
-        let requestBody = ManifestRequestBody(peerID: peerID)
-        let argData = try JSONEncoder().encode(requestBody)
-        let callBody = CallBody(
-            namespace: "orbital-sync",
-            service: "sync",
-            method: SyncMethod.manifest,
-            arguments: [EncodedArgument(key: "body", value: argData)]
+        let reply = try await peer.dispatcher.request(
+            SyncManifestRequest(peerID: peerID),
+            expecting: SyncManifestReply.self
         )
-        let request = try Matter.make(type: .call, body: callBody)
-        let response = try await peer.client.request(matter: request)
-        let reply = try response.decodeBody(CallReplyBody.self)
-
-        guard let resultData = reply.result else { return }
-        let remoteManifest = try JSONDecoder().decode(ManifestReplyBody.self, from: resultData).manifest
-
-        // Diff: find files remote has that we don't, or are newer
+        let remoteManifest = reply.manifest
         let localIndex = Dictionary(uniqueKeysWithValues: localManifest.entries.map { ($0.path, $0) })
-
         for remoteEntry in remoteManifest.entries {
             let needsPull: Bool
             if let localEntry = localIndex[remoteEntry.path] {
@@ -416,81 +451,46 @@ actor SyncDaemon {
             } else {
                 needsPull = true
             }
-
             if needsPull {
                 try await pullFile(remoteEntry.path, from: peer)
             }
         }
-
         logger.info("Reconciliation with \(peer.peerName) complete")
     }
 
     private func pullFile(_ path: String, from peer: PeerConnection) async throws {
-        let pullBody = FilePullBody(path: path)
-        let argData = try JSONEncoder().encode(pullBody)
-        let callBody = CallBody(
-            namespace: "orbital-sync",
-            service: "sync",
-            method: SyncMethod.filePull,
-            arguments: [EncodedArgument(key: "body", value: argData)]
+        let reply = try await peer.dispatcher.request(
+            SyncFilePull(path: path),
+            expecting: SyncFilePullReply.self
         )
-        let request = try Matter.make(type: .call, body: callBody)
-        let response = try await peer.client.request(matter: request)
-        let reply = try response.decodeBody(CallReplyBody.self)
-
-        guard let resultData = reply.result else { return }
-        let fileReply = try JSONDecoder().decode(FilePullReplyBody.self, from: resultData)
-        try writeFile(relativePath: fileReply.path, content: fileReply.content, modifiedAt: fileReply.modifiedAt)
+        try writeFile(relativePath: reply.path, content: reply.content, modifiedAt: reply.modifiedAt)
         logger.debug("Pulled \(path) from \(peer.peerName)")
     }
 
     private func handleFileChange(_ change: FileChange) async {
-        // Only sync memory files
         guard change.path.hasPrefix(Self.syncPrefix) else { return }
-
-        // Skip files recently written by sync to avoid ping-pong loops
         if let writeTime = recentSyncWrites[change.path],
-           Date().timeIntervalSince(writeTime) < 2.0 {
-            return
-        }
+           Date().timeIntervalSince(writeTime) < 2.0 { return }
         let now = Date()
         let staleKeys = recentSyncWrites.filter { now.timeIntervalSince($0.value) > 5.0 }.map(\.key)
         for key in staleKeys { recentSyncWrites.removeValue(forKey: key) }
-
         logger.info("File changed: \(change.kind) \(change.path), peers: \(peers.count)")
-
-        // Push file content to all peers
         for (_, peer) in peers {
             do {
                 if change.kind == .deleted {
-                    let deleteBody = FileDeleteBody(path: change.path)
-                    let argData = try JSONEncoder().encode(deleteBody)
-                    let callBody = CallBody(
-                        namespace: "orbital-sync",
-                        service: "sync",
-                        method: SyncMethod.fileDelete,
-                        arguments: [EncodedArgument(key: "body", value: argData)]
+                    _ = try await peer.dispatcher.request(
+                        SyncFileDelete(path: change.path),
+                        expecting: SyncFileDeleteReply.self
                     )
-                    let matter = try Matter.make(type: .call, body: callBody)
-                    _ = try await peer.client.request(matter: matter)
                 } else {
-                    // Push the file
                     let fileData = try readFile(relativePath: change.path)
-                    let pushBody = FilePushBody(
-                        path: change.path,
-                        content: fileData.content,
-                        hash: fileData.hash,
-                        modifiedAt: fileData.modifiedAt
+                    _ = try await peer.dispatcher.request(
+                        SyncFilePush(
+                            path: change.path, content: fileData.content,
+                            hash: fileData.hash, modifiedAt: fileData.modifiedAt
+                        ),
+                        expecting: SyncFilePushReply.self
                     )
-                    let argData = try JSONEncoder().encode(pushBody)
-                    let callBody = CallBody(
-                        namespace: "orbital-sync",
-                        service: "sync",
-                        method: SyncMethod.filePush,
-                        arguments: [EncodedArgument(key: "body", value: argData)]
-                    )
-                    let matter = try Matter.make(type: .call, body: callBody)
-                    _ = try await peer.client.request(matter: matter)
                 }
             } catch {
                 logger.error("Failed to push change to \(peer.peerName): \(error)")
@@ -498,18 +498,10 @@ actor SyncDaemon {
         }
     }
 
-    private func handlePeerPush(_ matter: Matter, from peerID: String) async {
-        // Handle server-push events from peers (e.g., file change notifications)
-        logger.debug("Received push from \(peerID): \(matter.type)")
-    }
-
     #if canImport(Network)
-    /// Resolve a Bonjour-discovered peer's endpoint and connect via NMT.
     private func resolveAndConnect(_ peer: DiscoveredPeer) async {
         let nmtPort = peer.nmtPort
         let peerName = peer.peerName
-
-        // Use NWConnection to resolve the Bonjour endpoint to an IP address
         let connection = NWConnection(to: peer.endpoint, using: .tcp)
         connection.stateUpdateHandler = { [weak self] state in
             guard let self else { return }
@@ -519,13 +511,9 @@ actor SyncDaemon {
                    case .hostPort(let host, _) = innerEndpoint {
                     let hostStr = "\(host)"
                     connection.cancel()
-
                     Task {
-                        do {
-                            try await self.addPeer(host: hostStr, port: nmtPort)
-                        } catch {
-                            self.logger.warning("mDNS auto-connect to \(peerName) failed: \(error)")
-                        }
+                        do { try await self.addPeer(host: hostStr, port: nmtPort) }
+                        catch { self.logger.warning("mDNS auto-connect to \(peerName) failed: \(error)") }
                     }
                 }
             case .failed:
@@ -569,4 +557,15 @@ actor SyncDaemon {
         let digest = SHA256.hash(data: data)
         return digest.map { String(format: "%02x", $0) }.joined()
     }
+}
+
+// MARK: - Errors
+
+enum SyncError: Error {
+    case missingArgument
+    case fileNotFound(String)
+    case daemonNotRunning
+    case invalidInviteCode
+    case noTeamConfigured
+    case handshakeRejected
 }

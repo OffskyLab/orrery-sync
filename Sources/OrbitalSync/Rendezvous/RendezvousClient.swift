@@ -1,5 +1,6 @@
 import Foundation
 import NMTP
+import NMTPeer
 import NIO
 import Logging
 
@@ -9,8 +10,11 @@ actor RendezvousClient {
     let serverPort: Int
     let logger = Logger(label: "orbital-sync.rv-client")
 
-    private var client: NMTClient?
+    private var dispatcher: PeerDispatcher?
+    private var runTask: Task<Void, Never>?
     private var heartbeatTask: Task<Void, Never>?
+    private var registeredPeerID: String?
+    private var registeredTeamID: String?
 
     init(host: String, port: Int) {
         self.serverHost = host
@@ -20,56 +24,54 @@ actor RendezvousClient {
     /// Connect to the rendezvous server and register this peer.
     /// Returns list of other peers in the same team.
     func register(peerID: String, peerName: String, teamID: String, host: String, port: Int) async throws -> [RVPeerEntry] {
+        // Clean up any previous registration before registering again
+        if dispatcher != nil {
+            await disconnect()
+        }
+
         let address = try SocketAddress(ipAddress: serverHost, port: serverPort)
-        let client = try await NMTClient.connect(to: address)
-        self.client = client
+        let d = try await PeerDispatcher.connect(to: address)
+        self.dispatcher = d
+        self.registeredPeerID = peerID
+        self.registeredTeamID = teamID
 
-        let body = RVRegisterBody(peerID: peerID, peerName: peerName, teamID: teamID, host: host, port: port)
-        let argData = try JSONEncoder().encode(body)
-        let callBody = CallBody(
-            namespace: "orbital-sync",
-            service: "rendezvous",
-            method: SyncMethod.rvRegister,
-            arguments: [EncodedArgument(key: "body", value: argData)]
+        // Start run() BEFORE issuing any request — ensures replies are routed
+        runTask = Task { try? await d.run() }
+
+        let reply = try await d.request(
+            RVRegister(peerID: peerID, peerName: peerName, teamID: teamID, host: host, port: port),
+            expecting: RVRegisterReply.self
         )
-        let request = try Matter.make(type: .call, body: callBody)
-        let response = try await client.request(matter: request)
-        let reply = try response.decodeBody(CallReplyBody.self)
-
-        guard let resultData = reply.result else { return [] }
-        let registerReply = try JSONDecoder().decode(RVRegisterReplyBody.self, from: resultData)
 
         // Start heartbeat loop
-        let hbPeerID = peerID
-        let hbTeamID = teamID
         heartbeatTask = Task {
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 25_000_000_000) // 25s
-                await self.sendHeartbeat(peerID: hbPeerID, teamID: hbTeamID)
+                try? await Task.sleep(for: .seconds(25))
+                await self.sendHeartbeatNow()
             }
         }
 
-        logger.info("Registered with rendezvous server, \(registerReply.peers.count) peer(s) found")
-        return registerReply.peers
+        logger.info("Registered with rendezvous server, \(reply.peers.count) peer(s) found")
+        return reply.peers
     }
 
     func disconnect() async {
         heartbeatTask?.cancel()
-        try? await client?.close()
-        client = nil
+        heartbeatTask = nil
+        runTask?.cancel()
+        runTask = nil
+        try? await dispatcher?.peer.close()
+        dispatcher = nil
     }
 
-    private func sendHeartbeat(peerID: String, teamID: String) {
-        guard let client else { return }
-        let body = RVHeartbeatBody(peerID: peerID, teamID: teamID)
-        guard let argData = try? JSONEncoder().encode(body) else { return }
-        let callBody = CallBody(
-            namespace: "orbital-sync",
-            service: "rendezvous",
-            method: SyncMethod.rvHeartbeat,
-            arguments: [EncodedArgument(key: "body", value: argData)]
+    /// Send a single heartbeat immediately. Used by the heartbeat loop and tests.
+    func sendHeartbeatNow() async {
+        guard let d = dispatcher,
+              let peerID = registeredPeerID,
+              let teamID = registeredTeamID else { return }
+        _ = try? await d.request(
+            RVHeartbeat(peerID: peerID, teamID: teamID),
+            expecting: RVHeartbeatReply.self
         )
-        guard let matter = try? Matter.make(type: .call, body: callBody) else { return }
-        client.fire(matter: matter)
     }
 }

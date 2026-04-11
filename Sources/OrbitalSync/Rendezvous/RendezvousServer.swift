@@ -1,5 +1,6 @@
 import Foundation
 import NMTP
+import NMTPeer
 import NIO
 import Logging
 
@@ -9,7 +10,8 @@ actor RendezvousServer {
     let port: Int
     let logger = Logger(label: "orbital-sync.rendezvous")
 
-    private var server: NMTServer?
+    private var serverListener: PeerDispatcherListener?
+    private var cleanupTask: Task<Void, Never>?
     /// teamID → [peerID: registration]
     private var registry: [String: [String: PeerRegistration]] = [:]
 
@@ -26,72 +28,74 @@ actor RendezvousServer {
     }
 
     func start() async throws {
-        let handler = RendezvousHandler(server: self)
         let address = try SocketAddress(ipAddress: "0.0.0.0", port: port)
-        server = try await NMTServer.bind(on: address, handler: handler)
+        serverListener = try await PeerDispatcher.listen(on: address) { [weak self] dispatcher in
+            self?.registerRVHandlers(on: dispatcher)
+        }
         logger.info("Rendezvous server listening on port \(port)")
 
-        // Start cleanup task — remove stale registrations every 30s
-        Task {
+        cleanupTask = Task {
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 30_000_000_000)
+                try? await Task.sleep(for: .seconds(30))
                 await self.cleanupStale()
             }
         }
 
-        try await server?.listen()
+        try await serverListener?.run()
     }
 
     func stop() async throws {
-        try await server?.stop()
+        cleanupTask?.cancel()
+        cleanupTask = nil
+        try await serverListener?.close()
+    }
+
+    // MARK: - Handler registration
+
+    nonisolated func registerRVHandlers(on dispatcher: PeerDispatcher) {
+        dispatcher.register(RVRegister.self) { [weak self] msg, peer in
+            guard let self else { return nil }
+            let remoteHost = peer.remoteAddress.ipAddress
+            return await self.register(msg, remoteAddress: remoteHost)
+        }
+
+        dispatcher.register(RVHeartbeat.self) { [weak self] msg, _ in
+            guard let self else { return nil }
+            return await self.heartbeat(msg)
+        }
     }
 
     // MARK: - Registry operations
 
-    func register(_ body: RVRegisterBody, remoteAddress: String?) -> RVRegisterReplyBody {
-        let host = body.host.isEmpty ? (remoteAddress ?? body.host) : body.host
+    func register(_ msg: RVRegister, remoteAddress: String?) -> RVRegisterReply {
+        let host = msg.host.isEmpty ? (remoteAddress ?? msg.host) : msg.host
         let reg = PeerRegistration(
-            peerID: body.peerID,
-            peerName: body.peerName,
-            host: host,
-            port: body.port,
-            lastSeen: Date()
+            peerID: msg.peerID, peerName: msg.peerName,
+            host: host, port: msg.port, lastSeen: Date()
         )
-
-        var teamPeers = registry[body.teamID] ?? [:]
-        teamPeers[body.peerID] = reg
-        registry[body.teamID] = teamPeers
-
-        logger.info("Registered \(body.peerName) (\(body.peerID)) for team \(body.teamID) at \(host):\(body.port)")
-
-        // Return all OTHER peers in the same team
+        var teamPeers = registry[msg.teamID] ?? [:]
+        teamPeers[msg.peerID] = reg
+        registry[msg.teamID] = teamPeers
+        logger.info("Registered \(msg.peerName) (\(msg.peerID)) for team \(msg.teamID) at \(host):\(msg.port)")
         let otherPeers = teamPeers.values
-            .filter { $0.peerID != body.peerID }
+            .filter { $0.peerID != msg.peerID }
             .map { RVPeerEntry(peerID: $0.peerID, peerName: $0.peerName, host: $0.host, port: $0.port) }
-
-        return RVRegisterReplyBody(peers: otherPeers)
+        return RVRegisterReply(peers: otherPeers)
     }
 
-    func heartbeat(_ body: RVHeartbeatBody) -> RVHeartbeatReplyBody {
-        if var teamPeers = registry[body.teamID],
-           var reg = teamPeers[body.peerID] {
-            reg = PeerRegistration(
+    func heartbeat(_ msg: RVHeartbeat) -> RVHeartbeatReply {
+        if var teamPeers = registry[msg.teamID], let reg = teamPeers[msg.peerID] {
+            teamPeers[msg.peerID] = PeerRegistration(
                 peerID: reg.peerID, peerName: reg.peerName,
                 host: reg.host, port: reg.port, lastSeen: Date()
             )
-            teamPeers[body.peerID] = reg
-            registry[body.teamID] = teamPeers
+            registry[msg.teamID] = teamPeers
         }
-        return RVHeartbeatReplyBody(ok: true)
-    }
-
-    func unregister(peerID: String, teamID: String) {
-        registry[teamID]?.removeValue(forKey: peerID)
-        logger.info("Unregistered \(peerID) from team \(teamID)")
+        return RVHeartbeatReply(ok: true)
     }
 
     private func cleanupStale() {
-        let staleThreshold: TimeInterval = 90 // 3 missed heartbeats (30s each)
+        let staleThreshold: TimeInterval = 90
         let now = Date()
         for (teamID, peers) in registry {
             let alive = peers.filter { now.timeIntervalSince($0.value.lastSeen) < staleThreshold }
