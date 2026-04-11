@@ -25,7 +25,6 @@ actor SyncDaemon {
     private var fileWatchTask: Task<Void, Never>?
     private var recentSyncWrites: [String: Date] = [:]
     private var isStopping = false
-    private var shouldStop: Bool { isStopping }
     #if canImport(Network)
     private var discovery: BonjourDiscovery?
     #endif
@@ -288,9 +287,9 @@ actor SyncDaemon {
             let maxDelay: UInt64 = 30_000_000_000
             let maxAttempts = 10
             for attempt in 1...maxAttempts {
-                try? await Task.sleep(nanoseconds: delay)
                 guard !Task.isCancelled else { return }
-                if await self.shouldStop { return }
+                if await self.isStopping { return }
+                try? await Task.sleep(nanoseconds: delay)
                 if await self.hasPeer(peerID) {
                     logger.info("Peer \(peerName) already reconnected")
                     return
