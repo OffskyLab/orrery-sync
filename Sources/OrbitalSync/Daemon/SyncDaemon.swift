@@ -25,6 +25,7 @@ actor SyncDaemon {
     private var fileWatchTask: Task<Void, Never>?
     private var recentSyncWrites: [String: Date] = [:]
     private var isStopping = false
+    private var shouldStop: Bool { isStopping }
     #if canImport(Network)
     private var discovery: BonjourDiscovery?
     #endif
@@ -199,22 +200,37 @@ actor SyncDaemon {
         let dispatcher = try await PeerDispatcher.connect(to: address, tls: tls)
         registerSyncHandlers(on: dispatcher)
 
+        // Start run() BEFORE sending any request — ensures replies are routed
+        let runTask = Task {
+            try? await dispatcher.run()
+        }
+
         let info = localPeerInfo()
         let config = SyncConfig.load()
-        let reply = try await dispatcher.request(
-            SyncHandshake(
-                peerID: info.peerID, peerName: info.peerName,
-                version: info.version, port: self.port, teamID: config.team?.id
-            ),
-            expecting: SyncHandshakeReply.self
-        )
+        let reply: SyncHandshakeReply
+        do {
+            reply = try await dispatcher.request(
+                SyncHandshake(
+                    peerID: info.peerID, peerName: info.peerName,
+                    version: info.version, port: self.port, teamID: config.team?.id
+                ),
+                expecting: SyncHandshakeReply.self
+            )
+        } catch {
+            runTask.cancel()
+            try? await dispatcher.peer.close()
+            throw error
+        }
+
         guard reply.accepted else {
+            runTask.cancel()
             try? await dispatcher.peer.close()
             logger.warning("Peer rejected handshake: \(host):\(port)")
             throw SyncError.handshakeRejected
         }
 
         guard !hasPeer(reply.peerID) else {
+            runTask.cancel()
             try? await dispatcher.peer.close()
             logger.debug("Already paired with \(reply.peerName), skipping")
             return
@@ -226,6 +242,7 @@ actor SyncDaemon {
             dispatcher: dispatcher, isInitiator: true
         )
         peers[reply.peerID] = connection
+        logger.info("Paired with \(reply.peerName) (\(reply.peerID))")
 
         // Save to known peers for auto-reconnect
         var cfg = SyncConfig.load()
@@ -240,8 +257,9 @@ actor SyncDaemon {
 
         let remotePeerID = reply.peerID
         let remotePeerName = reply.peerName
+        // When runTask finishes, the peer has disconnected
         Task {
-            try? await dispatcher.run()
+            await runTask.value
             await self.handlePeerDisconnect(
                 peerID: remotePeerID, peerName: remotePeerName,
                 host: host, port: port, isInitiator: true
@@ -271,7 +289,8 @@ actor SyncDaemon {
             let maxAttempts = 10
             for attempt in 1...maxAttempts {
                 try? await Task.sleep(nanoseconds: delay)
-                guard !Task.isCancelled, !self.isStopping else { return }
+                guard !Task.isCancelled else { return }
+                if await self.shouldStop { return }
                 if await self.hasPeer(peerID) {
                     logger.info("Peer \(peerName) already reconnected")
                     return
@@ -293,8 +312,8 @@ actor SyncDaemon {
     // MARK: - Handler registration
 
     nonisolated func registerSyncHandlers(on dispatcher: PeerDispatcher) {
-        dispatcher.register(SyncHandshake.self) { [weak self, weak dispatcher] msg, _ in
-            guard let self, let dispatcher else { return nil }
+        dispatcher.register(SyncHandshake.self) { [weak self, dispatcher] msg, _ in
+            guard let self else { return nil }
             let config = SyncConfig.load()
             if let team = config.team, let remoteTeam = msg.teamID, team.id != remoteTeam {
                 let info = await self.localPeerInfo()
