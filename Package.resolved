@@ -1,15 +1,6 @@
 {
-  "originHash" : "4ae4bdc1748802a98ae28bc003d72b1df32fd938747a610f4db199ad430053c6",
+  "originHash" : "92e8284fef4aaf1b31aed5042a094a8f6b9942ca4d0540b66d2fe55f7499f5c2",
   "pins" : [
-    {
-      "identity" : "messagepacker",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/hirotakan/MessagePacker.git",
-      "state" : {
-        "revision" : "4d8346c6bc579347e4df0429493760691c5aeca2",
-        "version" : "0.4.7"
-      }
-    },
     {
       "identity" : "swift-algorithms",
       "kind" : "remoteSourceControl",
@@ -150,8 +141,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/OffskyLab/swift-nmtp.git",
       "state" : {
-        "branch" : "main",
-        "revision" : "c6c3faa902a045214d82b6349f7753b86e1f159d"
+        "branch" : "feature/nmtp-peer",
+        "revision" : "1ef40c7924c35f4f457018fe35cb5fb5b03c884a"
       }
     },
     {
