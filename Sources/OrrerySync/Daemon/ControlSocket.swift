@@ -6,7 +6,7 @@ import Logging
 /// Unix domain socket server for CLI → Daemon communication.
 final class ControlSocket: Sendable {
     let socketPath: String
-    let logger = Logger(label: "orbital-sync.control")
+    let logger = Logger(label: "orrery-sync.control")
     let commandHandler: @Sendable (ControlRequest) async -> ControlResponse
 
     private let state = Mutex(ControlSocketState())
@@ -22,10 +22,10 @@ final class ControlSocket: Sendable {
     ) {
         if let socketPath {
             self.socketPath = socketPath
-        } else if let home = ProcessInfo.processInfo.environment["ORBITAL_HOME"] {
+        } else if let home = ProcessInfo.processInfo.environment["ORRERY_HOME"] {
             self.socketPath = home + "/sync.sock"
         } else {
-            self.socketPath = FileManager.default.homeDirectoryForCurrentUser.path + "/.orbital/sync.sock"
+            self.socketPath = FileManager.default.homeDirectoryForCurrentUser.path + "/.orrery/sync.sock"
         }
         self.commandHandler = onCommand
     }

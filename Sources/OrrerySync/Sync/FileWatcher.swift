@@ -8,7 +8,7 @@ import CoreServices
 /// Watches a directory recursively for file changes and yields events via AsyncStream.
 struct FileWatcher: Sendable {
     let directory: String
-    let logger = Logger(label: "orbital-sync.watcher")
+    let logger = Logger(label: "orrery-sync.watcher")
 
     init(directory: String) {
         // Resolve symlinks (e.g. /tmp → /private/tmp on macOS)
@@ -88,7 +88,7 @@ struct FileWatcher: Sendable {
                 return
             }
 
-            let queue = DispatchQueue(label: "orbital-sync.fsevents", qos: .utility)
+            let queue = DispatchQueue(label: "orrery-sync.fsevents", qos: .utility)
             FSEventStreamSetDispatchQueue(stream, queue)
             FSEventStreamStart(stream)
 

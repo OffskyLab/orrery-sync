@@ -3,16 +3,16 @@ import Foundation
 import Network
 import Logging
 
-/// Advertises and discovers orbital-sync peers on the local network via Bonjour/mDNS.
+/// Advertises and discovers orrery-sync peers on the local network via Bonjour/mDNS.
 actor BonjourDiscovery {
-    static let serviceType = "_orbital-sync._tcp"
+    static let serviceType = "_orrery-sync._tcp"
     static let domain = "local."
 
     let peerID: String
     let peerName: String
     let port: Int
     let teamID: String?
-    let logger = Logger(label: "orbital-sync.discovery")
+    let logger = Logger(label: "orrery-sync.discovery")
 
     private var listener: NWListener?
     private var browser: NWBrowser?
@@ -68,7 +68,7 @@ actor BonjourDiscovery {
             connection.cancel()
         }
 
-        listener.start(queue: DispatchQueue(label: "orbital-sync.bonjour.advertise"))
+        listener.start(queue: DispatchQueue(label: "orrery-sync.bonjour.advertise"))
         self.listener = listener
     }
 
@@ -98,7 +98,7 @@ actor BonjourDiscovery {
             Task { await self.handleBrowseResults(results, changes: changes) }
         }
 
-        browser.start(queue: DispatchQueue(label: "orbital-sync.bonjour.browse"))
+        browser.start(queue: DispatchQueue(label: "orrery-sync.bonjour.browse"))
         self.browser = browser
     }
 

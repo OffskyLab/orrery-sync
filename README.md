@@ -1,6 +1,6 @@
-# orbital-sync
+# orrery-sync
 
-P2P real-time sync daemon for [Orbital](https://github.com/OffskyLab/Orbital). Keeps `~/.orbital/shared/` in sync across multiple machines — sessions, memory, and environment config.
+P2P real-time sync daemon for [Orrery](https://github.com/OffskyLab/Orrery). Keeps `~/.orrery/shared/` in sync across multiple machines — sessions, memory, and environment config.
 
 Built on [NMT protocol](https://github.com/OffskyLab/swift-nmtp) (Nebula Matter Transfer).
 
@@ -9,7 +9,7 @@ Built on [NMT protocol](https://github.com/OffskyLab/swift-nmtp) (Nebula Matter 
 ### Homebrew (macOS / Linux)
 
 ```bash
-brew install OffskyLab/orbital/orbital-sync
+brew install OffskyLab/orrery/orrery-sync
 ```
 
 ### APT (Ubuntu / Debian)
@@ -17,16 +17,16 @@ brew install OffskyLab/orbital/orbital-sync
 ```bash
 curl -fsSL https://offskylab.github.io/apt/pubkey.gpg | sudo gpg --dearmor -o /usr/share/keyrings/offskylab.gpg
 echo "deb [signed-by=/usr/share/keyrings/offskylab.gpg] https://offskylab.github.io/apt stable main" | sudo tee /etc/apt/sources.list.d/offskylab.list
-sudo apt update && sudo apt install orbital-sync
+sudo apt update && sudo apt install orrery-sync
 ```
 
 ### From source
 
 ```bash
-git clone https://github.com/OffskyLab/orbital-sync.git
-cd orbital-sync
+git clone https://github.com/OffskyLab/orrery-sync.git
+cd orrery-sync
 swift build -c release
-cp .build/release/orbital-sync ~/.orbital/bin/
+cp .build/release/orrery-sync ~/.orrery/bin/
 ```
 
 ## Quick start
@@ -35,23 +35,23 @@ cp .build/release/orbital-sync ~/.orbital/bin/
 
 ```bash
 # Machine A
-orbital-sync daemon --port 9527
+orrery-sync daemon --port 9527
 
 # Machine B
-orbital-sync pair 192.168.1.100:9527
-orbital-sync daemon --port 9528
+orrery-sync pair 192.168.1.100:9527
+orrery-sync daemon --port 9528
 ```
 
 Bonjour auto-discovery is enabled by default on macOS — peers on the same LAN find each other automatically.
 
-### With Orbital CLI
+### With Orrery CLI
 
-All commands work through `orbital sync`:
+All commands work through `orrery sync`:
 
 ```bash
-orbital sync daemon --port 9527
-orbital sync status
-orbital sync pair 192.168.1.100:9527
+orrery sync daemon --port 9527
+orrery sync status
+orrery sync pair 192.168.1.100:9527
 ```
 
 ## Usage patterns
@@ -62,10 +62,10 @@ Both machines on the same network. Start the daemon on each — Bonjour handles 
 
 ```bash
 # Desktop
-orbital-sync daemon --port 9527
+orrery-sync daemon --port 9527
 
 # Laptop
-orbital-sync daemon --port 9528
+orrery-sync daemon --port 9528
 # → auto-discovers desktop via Bonjour, syncs immediately
 ```
 
@@ -75,21 +75,21 @@ Create a team so only authorized peers can connect:
 
 ```bash
 # Alice creates team and generates invite
-orbital-sync team create frontend-team
-orbital-sync team invite --port 9527
+orrery-sync team create frontend-team
+orrery-sync team invite --port 9527
 # → prints a base64 invite code, share via Slack/email
 
 # Alice starts daemon
-orbital-sync daemon --port 9527
+orrery-sync daemon --port 9527
 
 # Bob joins
-orbital-sync team join <invite-code>
-orbital-sync daemon --port 9528
+orrery-sync team join <invite-code>
+orrery-sync daemon --port 9528
 # → auto-connects to Alice, pulls all existing memory
 
 # Charlie joins
-orbital-sync team join <invite-code>
-orbital-sync daemon --port 9529
+orrery-sync team join <invite-code>
+orrery-sync daemon --port 9529
 # → full mesh: all three peers connected
 ```
 
@@ -99,11 +99,11 @@ For peers on different networks (different offices, home + office):
 
 ```bash
 # Run rendezvous on a VPS or cloud server
-orbital-sync rendezvous --port 9600
+orrery-sync rendezvous --port 9600
 
 # Each peer connects through it
-orbital-sync daemon --port 9527 --rendezvous rv.example.com:9600
-orbital-sync daemon --port 9528 --rendezvous rv.example.com:9600
+orrery-sync daemon --port 9527 --rendezvous rv.example.com:9600
+orrery-sync daemon --port 9528 --rendezvous rv.example.com:9600
 # → rendezvous exchanges IPs, peers connect directly
 ```
 
@@ -116,7 +116,7 @@ For sensitive environments — both peers must present certificates signed by th
 ./samples/gen-test-certs.sh
 
 # Start with TLS
-orbital-sync daemon --port 9527 \
+orrery-sync daemon --port 9527 \
   --tls-ca certs/ca.pem \
   --tls-cert certs/node-a.pem \
   --tls-key certs/node-a-key.pem
@@ -127,20 +127,20 @@ orbital-sync daemon --port 9527 \
 Combine all discovery layers:
 
 ```bash
-orbital-sync daemon --port 9527 --rendezvous rv.company.com:9600
+orrery-sync daemon --port 9527 --rendezvous rv.company.com:9600
 # → Same LAN: Bonjour auto-discovery (fastest)
 # → Known peers: auto-connect from config
 # → Cross-network: rendezvous server
-# → Manual: orbital-sync pair host:port
+# → Manual: orrery-sync pair host:port
 ```
 
 ## What gets synced
 
-Only memory files under `~/.orbital/shared/memory/`:
+Only memory files under `~/.orrery/shared/memory/`:
 
 | Path | Content | Sync behavior |
 |------|---------|---------------|
-| `memory/*/ORBITAL_MEMORY.md` | Shared memory | Via fragments |
+| `memory/*/ORRERY_MEMORY.md` | Shared memory | Via fragments |
 | `memory/*/fragments/` | Memory fragments | Conflict-free sync |
 
 Sessions (`claude/`, `codex/`, `gemini/`) are **not synced** — they are machine-specific (bound to local paths and environment accounts) and not useful across peers.
@@ -148,7 +148,7 @@ Sessions (`claude/`, `codex/`, `gemini/`) are **not synced** — they are machin
 ### Memory fragment workflow
 
 When memory is written on Machine A:
-1. `ORBITAL_MEMORY.md` is updated locally
+1. `ORRERY_MEMORY.md` is updated locally
 2. A fragment file is created in `fragments/`
 3. Fragment syncs to all peers
 4. On Machine B, next agent session reads memory → sees pending fragments → consolidates → writes back → fragments cleaned up
@@ -156,14 +156,14 @@ When memory is written on Machine A:
 ## Commands
 
 ```
-orbital-sync daemon        Start the sync daemon
-orbital-sync pair          Pair with a remote peer
-orbital-sync status        Show daemon and peer status
-orbital-sync team create   Create a new team
-orbital-sync team invite   Generate an invite code
-orbital-sync team join     Join a team using an invite code
-orbital-sync team info     Show current team and known peers
-orbital-sync rendezvous    Run a rendezvous server
+orrery-sync daemon        Start the sync daemon
+orrery-sync pair          Pair with a remote peer
+orrery-sync status        Show daemon and peer status
+orrery-sync team create   Create a new team
+orrery-sync team invite   Generate an invite code
+orrery-sync team join     Join a team using an invite code
+orrery-sync team info     Show current team and known peers
+orrery-sync rendezvous    Run a rendezvous server
 ```
 
 ## Architecture
@@ -171,27 +171,27 @@ orbital-sync rendezvous    Run a rendezvous server
 ```
 Machine A                              Machine B
 ┌──────────────────┐                  ┌──────────────────┐
-│  orbital-sync    │◄── NMT/TCP ────►│  orbital-sync    │
+│  orrery-sync    │◄── NMT/TCP ────►│  orrery-sync    │
 │    daemon        │   (P2P mesh)     │    daemon        │
 ├──────────────────┤                  ├──────────────────┤
 │  FileWatcher     │                  │  FileWatcher     │
 │  (FSEvents/poll) │                  │  (FSEvents/poll) │
 ├──────────────────┤                  ├──────────────────┤
-│  ~/.orbital/     │                  │  ~/.orbital/     │
+│  ~/.orrery/     │                  │  ~/.orrery/     │
 │    shared/       │                  │    shared/       │
 └──────────────────┘                  └──────────────────┘
         │                                      │
    Unix socket                            Unix socket
-   (~/.orbital/sync.sock)                 (~/.orbital/sync.sock)
+   (~/.orrery/sync.sock)                 (~/.orrery/sync.sock)
         │                                      │
-   orbital sync status                    orbital sync status
+   orrery sync status                    orrery sync status
 ```
 
 Discovery layers (used in order of speed):
 1. **mDNS/Bonjour** — same LAN, zero config
-2. **Known peers** — saved in `~/.orbital/sync-config.json`
+2. **Known peers** — saved in `~/.orrery/sync-config.json`
 3. **Rendezvous server** — cross-network coordination
-4. **Manual pairing** — `orbital-sync pair host:port`
+4. **Manual pairing** — `orrery-sync pair host:port`
 
 ## License
 

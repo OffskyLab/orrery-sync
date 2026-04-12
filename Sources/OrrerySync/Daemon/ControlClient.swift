@@ -8,10 +8,10 @@ struct ControlClient {
     init(socketPath: String? = nil) {
         if let socketPath {
             self.socketPath = socketPath
-        } else if let home = ProcessInfo.processInfo.environment["ORBITAL_HOME"] {
+        } else if let home = ProcessInfo.processInfo.environment["ORRERY_HOME"] {
             self.socketPath = home + "/sync.sock"
         } else {
-            self.socketPath = FileManager.default.homeDirectoryForCurrentUser.path + "/.orbital/sync.sock"
+            self.socketPath = FileManager.default.homeDirectoryForCurrentUser.path + "/.orrery/sync.sock"
         }
     }
 

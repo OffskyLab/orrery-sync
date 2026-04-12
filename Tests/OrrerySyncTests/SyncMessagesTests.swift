@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import OrbitalSync
+@testable import OrrerySync
 import NMTPeer
 
 struct SyncMessagesTests {

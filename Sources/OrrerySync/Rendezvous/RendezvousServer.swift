@@ -8,7 +8,7 @@ import Logging
 /// Does NOT relay data — only exchanges peer connection info.
 actor RendezvousServer {
     let port: Int
-    let logger = Logger(label: "orbital-sync.rendezvous")
+    let logger = Logger(label: "orrery-sync.rendezvous")
 
     private var serverListener: PeerDispatcherListener?
     private var cleanupTask: Task<Void, Never>?

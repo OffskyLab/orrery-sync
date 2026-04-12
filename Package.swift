@@ -2,10 +2,10 @@
 import PackageDescription
 
 let package = Package(
-    name: "orbital-sync",
+    name: "orrery-sync",
     platforms: [.macOS(.v15)],
     products: [
-        .executable(name: "orbital-sync", targets: ["OrbitalSync"]),
+        .executable(name: "orrery-sync", targets: ["OrrerySync"]),
     ],
     dependencies: [
         .package(url: "https://github.com/OffskyLab/swift-nmtp.git", from: "0.1.0"),
@@ -15,7 +15,7 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-nio-ssl.git", from: "2.26.0"),
     ],
     targets: [
-        .executableTarget(name: "OrbitalSync", dependencies: [
+        .executableTarget(name: "OrrerySync", dependencies: [
             .product(name: "NMTP", package: "swift-nmtp"),
             .product(name: "NMTPeer", package: "swift-nmtp"),
             .product(name: "ArgumentParser", package: "swift-argument-parser"),
@@ -23,8 +23,8 @@ let package = Package(
             .product(name: "Crypto", package: "swift-crypto"),
             .product(name: "NIOSSL", package: "swift-nio-ssl"),
         ]),
-        .testTarget(name: "OrbitalSyncTests", dependencies: [
-            "OrbitalSync",
+        .testTarget(name: "OrrerySyncTests", dependencies: [
+            "OrrerySync",
             .product(name: "NMTPeer", package: "swift-nmtp"),
         ]),
     ]

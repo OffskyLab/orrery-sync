@@ -13,7 +13,7 @@ struct TeamCommand: AsyncParsableCommand {
         ]
     )
 
-    @OptionGroup var globals: OrbitalSyncCommand
+    @OptionGroup var globals: OrrerySyncCommand
 }
 
 // MARK: - team create
@@ -24,7 +24,7 @@ struct TeamCreateCommand: AsyncParsableCommand {
         abstract: "Create a new team"
     )
 
-    @OptionGroup var globals: OrbitalSyncCommand
+    @OptionGroup var globals: OrrerySyncCommand
 
     @Argument(help: "Team name")
     var name: String
@@ -54,7 +54,7 @@ struct TeamCreateCommand: AsyncParsableCommand {
         print("Team '\(name)' created.")
         print("Team ID: \(team.id)")
         print("")
-        print("Next: run 'orbital-sync team invite' to generate an invite code for others.")
+        print("Next: run 'orrery-sync team invite' to generate an invite code for others.")
     }
 }
 
@@ -66,7 +66,7 @@ struct TeamInviteCommand: AsyncParsableCommand {
         abstract: "Generate an invite code for a peer"
     )
 
-    @OptionGroup var globals: OrbitalSyncCommand
+    @OptionGroup var globals: OrrerySyncCommand
 
     @Option(name: .shortAndLong, help: "NMT server port to share")
     var port: Int = 9527
@@ -77,7 +77,7 @@ struct TeamInviteCommand: AsyncParsableCommand {
     func run() async throws {
         let config = SyncConfig.load()
         guard let team = config.team else {
-            print("No team configured. Create one with: orbital-sync team create <name>")
+            print("No team configured. Create one with: orrery-sync team create <name>")
             throw ExitCode.failure
         }
 
@@ -97,7 +97,7 @@ struct TeamInviteCommand: AsyncParsableCommand {
         print(code)
         print("")
         print("Share this code with your teammate.")
-        print("They can join with: orbital-sync team join <code>")
+        print("They can join with: orrery-sync team join <code>")
     }
 
     private func detectLocalIP() -> String? {
@@ -139,7 +139,7 @@ struct TeamJoinCommand: AsyncParsableCommand {
         abstract: "Join a team using an invite code"
     )
 
-    @OptionGroup var globals: OrbitalSyncCommand
+    @OptionGroup var globals: OrrerySyncCommand
 
     @Argument(help: "Invite code from team invite")
     var code: String
@@ -182,7 +182,7 @@ struct TeamJoinCommand: AsyncParsableCommand {
         print("Joined team '\(invite.teamName)'!")
         print("Inviter: \(invite.host):\(invite.port)")
         print("")
-        print("Start the daemon to connect: orbital-sync daemon")
+        print("Start the daemon to connect: orrery-sync daemon")
     }
 }
 
@@ -194,7 +194,7 @@ struct TeamInfoCommand: AsyncParsableCommand {
         abstract: "Show current team and known peers"
     )
 
-    @OptionGroup var globals: OrbitalSyncCommand
+    @OptionGroup var globals: OrrerySyncCommand
 
     func run() async throws {
         let config = SyncConfig.load()

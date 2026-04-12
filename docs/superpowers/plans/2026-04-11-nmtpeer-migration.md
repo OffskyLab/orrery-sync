@@ -1,8 +1,8 @@
-# orbital-sync NMTPeer Migration Implementation Plan
+# orrery-sync NMTPeer Migration Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Migrate `orbital-sync` from the asymmetric `NMTServer`/`NMTClient`/`NMTHandler` architecture to the symmetric `NMTPeer`/`PeerDispatcher` layer (PR #4 on swift-nmtp, branch `feature/nmtp-peer`).
+**Goal:** Migrate `orrery-sync` from the asymmetric `NMTServer`/`NMTClient`/`NMTHandler` architecture to the symmetric `NMTPeer`/`PeerDispatcher` layer (PR #4 on swift-nmtp, branch `feature/nmtp-peer`).
 
 **Architecture:** Replace `CallBody` string-method dispatch with typed `PeerMessage` conformers identified by `UInt16` messageType. `PeerListener` replaces `NMTServer`. `PeerDispatcher.connect` replaces `NMTClient`. The reverse-pairing hack (server opening an outbound `NMTClient` back to each connector) is eliminated — `PeerDispatcher` is symmetric so both sides communicate on the already-open connection. Clean-break: no backward-compat with v1.x wire format.
 
@@ -15,18 +15,18 @@
 | Action | Path | Responsibility |
 |--------|------|----------------|
 | Modify | `Package.swift` | Add `NMTPeer` product dependency |
-| Create | `Sources/OrbitalSync/Sync/SyncMessages.swift` | All `PeerMessage` conformers (sync + rendezvous namespaces) |
-| Modify | `Sources/OrbitalSync/Sync/SyncBodies.swift` | Remove everything except `ControlRequest`/`ControlResponse` |
-| Delete | `Sources/OrbitalSync/Sync/SyncMethods.swift` | String constants replaced by `static var messageType: UInt16` |
-| Modify | `Sources/OrbitalSync/Daemon/PeerConnection.swift` | Replace `client: NMTClient` with `dispatcher: PeerDispatcher, isInitiator: Bool` |
-| Rewrite | `Sources/OrbitalSync/Daemon/SyncDaemon.swift` | `PeerListener`-based accept loop; `PeerDispatcher.connect` for outbound; typed request/reply throughout |
-| Delete | `Sources/OrbitalSync/Daemon/SyncHandler.swift` | Logic moves inline to `SyncDaemon`; `SyncError` moves to `SyncDaemon.swift` |
-| Rewrite | `Sources/OrbitalSync/Rendezvous/RendezvousServer.swift` | `NMTServer` → `PeerDispatcher.listen`; handler registration inline |
-| Rewrite | `Sources/OrbitalSync/Rendezvous/RendezvousClient.swift` | `NMTClient` → `PeerDispatcher.connect`; typed `request<M,R>` |
-| Delete | `Sources/OrbitalSync/Rendezvous/RendezvousHandler.swift` | Logic moves inline to `RendezvousServer` |
-| Create | `Tests/OrbitalSyncTests/SyncMessagesTests.swift` | Task 1 tests |
-| Create | `Tests/OrbitalSyncTests/SyncDaemonPeerTests.swift` | Task 2 tests |
-| Create | `Tests/OrbitalSyncTests/RendezvousTests.swift` | Task 3 tests |
+| Create | `Sources/OrrerySync/Sync/SyncMessages.swift` | All `PeerMessage` conformers (sync + rendezvous namespaces) |
+| Modify | `Sources/OrrerySync/Sync/SyncBodies.swift` | Remove everything except `ControlRequest`/`ControlResponse` |
+| Delete | `Sources/OrrerySync/Sync/SyncMethods.swift` | String constants replaced by `static var messageType: UInt16` |
+| Modify | `Sources/OrrerySync/Daemon/PeerConnection.swift` | Replace `client: NMTClient` with `dispatcher: PeerDispatcher, isInitiator: Bool` |
+| Rewrite | `Sources/OrrerySync/Daemon/SyncDaemon.swift` | `PeerListener`-based accept loop; `PeerDispatcher.connect` for outbound; typed request/reply throughout |
+| Delete | `Sources/OrrerySync/Daemon/SyncHandler.swift` | Logic moves inline to `SyncDaemon`; `SyncError` moves to `SyncDaemon.swift` |
+| Rewrite | `Sources/OrrerySync/Rendezvous/RendezvousServer.swift` | `NMTServer` → `PeerDispatcher.listen`; handler registration inline |
+| Rewrite | `Sources/OrrerySync/Rendezvous/RendezvousClient.swift` | `NMTClient` → `PeerDispatcher.connect`; typed `request<M,R>` |
+| Delete | `Sources/OrrerySync/Rendezvous/RendezvousHandler.swift` | Logic moves inline to `RendezvousServer` |
+| Create | `Tests/OrrerySyncTests/SyncMessagesTests.swift` | Task 1 tests |
+| Create | `Tests/OrrerySyncTests/SyncDaemonPeerTests.swift` | Task 2 tests |
+| Create | `Tests/OrrerySyncTests/RendezvousTests.swift` | Task 3 tests |
 
 ---
 
@@ -34,10 +34,10 @@
 
 **Files:**
 - Modify: `Package.swift`
-- Create: `Sources/OrbitalSync/Sync/SyncMessages.swift`
-- Modify: `Sources/OrbitalSync/Sync/SyncBodies.swift` (trim to control types only)
-- Delete: `Sources/OrbitalSync/Sync/SyncMethods.swift`
-- Test: `Tests/OrbitalSyncTests/SyncMessagesTests.swift`
+- Create: `Sources/OrrerySync/Sync/SyncMessages.swift`
+- Modify: `Sources/OrrerySync/Sync/SyncBodies.swift` (trim to control types only)
+- Delete: `Sources/OrrerySync/Sync/SyncMethods.swift`
+- Test: `Tests/OrrerySyncTests/SyncMessagesTests.swift`
 
 - [ ] **Step 1: Update Package.swift to import NMTPeer**
 
@@ -50,10 +50,10 @@ Replace the entire `Package.swift` with:
 import PackageDescription
 
 let package = Package(
-    name: "orbital-sync",
+    name: "orrery-sync",
     platforms: [.macOS(.v15)],
     products: [
-        .executable(name: "orbital-sync", targets: ["OrbitalSync"]),
+        .executable(name: "orrery-sync", targets: ["OrrerySync"]),
     ],
     dependencies: [
         .package(url: "https://github.com/OffskyLab/swift-nmtp.git", branch: "feature/nmtp-peer"),
@@ -63,7 +63,7 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-nio-ssl.git", from: "2.26.0"),
     ],
     targets: [
-        .executableTarget(name: "OrbitalSync", dependencies: [
+        .executableTarget(name: "OrrerySync", dependencies: [
             .product(name: "NMTP", package: "swift-nmtp"),
             .product(name: "NMTPeer", package: "swift-nmtp"),
             .product(name: "ArgumentParser", package: "swift-argument-parser"),
@@ -71,8 +71,8 @@ let package = Package(
             .product(name: "Crypto", package: "swift-crypto"),
             .product(name: "NIOSSL", package: "swift-nio-ssl"),
         ]),
-        .testTarget(name: "OrbitalSyncTests", dependencies: [
-            "OrbitalSync",
+        .testTarget(name: "OrrerySyncTests", dependencies: [
+            "OrrerySync",
             .product(name: "NMTPeer", package: "swift-nmtp"),
         ]),
     ]
@@ -81,12 +81,12 @@ let package = Package(
 
 - [ ] **Step 2: Write failing tests for SyncMessages**
 
-Create `Tests/OrbitalSyncTests/SyncMessagesTests.swift`:
+Create `Tests/OrrerySyncTests/SyncMessagesTests.swift`:
 
 ```swift
 import Testing
 import Foundation
-@testable import OrbitalSync
+@testable import OrrerySync
 import NMTPeer
 
 struct SyncMessagesTests {
@@ -188,7 +188,7 @@ struct SyncMessagesTests {
 - [ ] **Step 3: Run tests — expect compile failure (types don't exist yet)**
 
 ```bash
-cd /Users/gradyzhuo/Dropbox/Work/OpenSource/orbital-sync
+cd /Users/gradyzhuo/Dropbox/Work/OpenSource/orrery-sync
 swift test --filter SyncMessagesTests 2>&1 | head -30
 ```
 
@@ -196,7 +196,7 @@ Expected: compile error — `SyncHandshake`, `SyncHandshakeReply`, etc. not foun
 
 - [ ] **Step 4: Create SyncMessages.swift**
 
-Create `Sources/OrbitalSync/Sync/SyncMessages.swift`:
+Create `Sources/OrrerySync/Sync/SyncMessages.swift`:
 
 ```swift
 import Foundation
@@ -306,7 +306,7 @@ struct RVPeerEntry: Codable, Sendable {
 
 - [ ] **Step 5: Trim SyncBodies.swift — remove all non-control types**
 
-Replace `Sources/OrbitalSync/Sync/SyncBodies.swift` with only the control types that `ControlSocket`/`ControlClient` need:
+Replace `Sources/OrrerySync/Sync/SyncBodies.swift` with only the control types that `ControlSocket`/`ControlClient` need:
 
 ```swift
 import Foundation
@@ -328,7 +328,7 @@ struct ControlResponse: Codable, Sendable {
 - [ ] **Step 6: Delete SyncMethods.swift**
 
 ```bash
-rm Sources/OrbitalSync/Sync/SyncMethods.swift
+rm Sources/OrrerySync/Sync/SyncMethods.swift
 ```
 
 - [ ] **Step 7: Run tests — expect pass**
@@ -350,8 +350,8 @@ Expected: errors in `SyncHandler.swift`, `SyncDaemon.swift`, `RendezvousHandler.
 - [ ] **Step 9: Commit**
 
 ```bash
-git add Package.swift Sources/OrbitalSync/Sync/SyncMessages.swift Sources/OrbitalSync/Sync/SyncBodies.swift Tests/OrbitalSyncTests/SyncMessagesTests.swift
-git rm Sources/OrbitalSync/Sync/SyncMethods.swift
+git add Package.swift Sources/OrrerySync/Sync/SyncMessages.swift Sources/OrrerySync/Sync/SyncBodies.swift Tests/OrrerySyncTests/SyncMessagesTests.swift
+git rm Sources/OrrerySync/Sync/SyncMethods.swift
 git commit -m "feat: add SyncMessages PeerMessage conformers; trim SyncBodies; drop SyncMethods"
 ```
 
@@ -360,10 +360,10 @@ git commit -m "feat: add SyncMessages PeerMessage conformers; trim SyncBodies; d
 ## Task 2: PeerConnection + SyncDaemon
 
 **Files:**
-- Modify: `Sources/OrbitalSync/Daemon/PeerConnection.swift`
-- Rewrite: `Sources/OrbitalSync/Daemon/SyncDaemon.swift`
-- Delete: `Sources/OrbitalSync/Daemon/SyncHandler.swift`
-- Test: `Tests/OrbitalSyncTests/SyncDaemonPeerTests.swift`
+- Modify: `Sources/OrrerySync/Daemon/PeerConnection.swift`
+- Rewrite: `Sources/OrrerySync/Daemon/SyncDaemon.swift`
+- Delete: `Sources/OrrerySync/Daemon/SyncHandler.swift`
+- Test: `Tests/OrrerySyncTests/SyncDaemonPeerTests.swift`
 
 ### Context
 
@@ -380,12 +380,12 @@ The actor runs handlers registered on `PeerDispatcher`. Since handler closures a
 
 - [ ] **Step 1: Write failing integration tests**
 
-Create `Tests/OrbitalSyncTests/SyncDaemonPeerTests.swift`:
+Create `Tests/OrrerySyncTests/SyncDaemonPeerTests.swift`:
 
 ```swift
 import Testing
 import Foundation
-@testable import OrbitalSync
+@testable import OrrerySync
 
 struct SyncDaemonPeerTests {
 
@@ -542,7 +542,7 @@ actor SyncDaemon {
     let peerID: String
     let tls: SyncTLSContext?
     let rendezvousAddress: String?
-    let logger = Logger(label: "orbital-sync")
+    let logger = Logger(label: "orrery-sync")
 
     private var peerListener: PeerListener?
     private var peers: [String: PeerConnection] = [:]
@@ -1024,7 +1024,7 @@ actor SyncDaemon {
                 break
             }
         }
-        connection.start(queue: DispatchQueue(label: "orbital-sync.resolve"))
+        connection.start(queue: DispatchQueue(label: "orrery-sync.resolve"))
     }
     #endif
 
@@ -1068,8 +1068,8 @@ enum SyncError: Error {
 - [ ] **Step 5: Delete SyncHandler.swift**
 
 ```bash
-cd /Users/gradyzhuo/Dropbox/Work/OpenSource/orbital-sync
-git rm Sources/OrbitalSync/Daemon/SyncHandler.swift
+cd /Users/gradyzhuo/Dropbox/Work/OpenSource/orrery-sync
+git rm Sources/OrrerySync/Daemon/SyncHandler.swift
 ```
 
 - [ ] **Step 6: Verify build**
@@ -1093,8 +1093,8 @@ Expected: all 3 tests pass.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add Sources/OrbitalSync/Daemon/PeerConnection.swift Sources/OrbitalSync/Daemon/SyncDaemon.swift Tests/OrbitalSyncTests/SyncDaemonPeerTests.swift
-git rm Sources/OrbitalSync/Daemon/SyncHandler.swift
+git add Sources/OrrerySync/Daemon/PeerConnection.swift Sources/OrrerySync/Daemon/SyncDaemon.swift Tests/OrrerySyncTests/SyncDaemonPeerTests.swift
+git rm Sources/OrrerySync/Daemon/SyncHandler.swift
 git commit -m "feat: migrate SyncDaemon to PeerListener + PeerDispatcher; remove SyncHandler"
 ```
 
@@ -1103,10 +1103,10 @@ git commit -m "feat: migrate SyncDaemon to PeerListener + PeerDispatcher; remove
 ## Task 3: Rendezvous Migration
 
 **Files:**
-- Rewrite: `Sources/OrbitalSync/Rendezvous/RendezvousServer.swift`
-- Rewrite: `Sources/OrbitalSync/Rendezvous/RendezvousClient.swift`
-- Delete: `Sources/OrbitalSync/Rendezvous/RendezvousHandler.swift`
-- Test: `Tests/OrbitalSyncTests/RendezvousTests.swift`
+- Rewrite: `Sources/OrrerySync/Rendezvous/RendezvousServer.swift`
+- Rewrite: `Sources/OrrerySync/Rendezvous/RendezvousClient.swift`
+- Delete: `Sources/OrrerySync/Rendezvous/RendezvousHandler.swift`
+- Test: `Tests/OrrerySyncTests/RendezvousTests.swift`
 
 ### Context
 
@@ -1114,12 +1114,12 @@ git commit -m "feat: migrate SyncDaemon to PeerListener + PeerDispatcher; remove
 
 - [ ] **Step 1: Write failing tests**
 
-Create `Tests/OrbitalSyncTests/RendezvousTests.swift`:
+Create `Tests/OrrerySyncTests/RendezvousTests.swift`:
 
 ```swift
 import Testing
 import Foundation
-@testable import OrbitalSync
+@testable import OrrerySync
 
 struct RendezvousTests {
 
@@ -1212,7 +1212,7 @@ Expected: compile errors — `RendezvousClient` may not have `sendHeartbeatNow()
 - [ ] **Step 3: Delete RendezvousHandler.swift**
 
 ```bash
-git rm Sources/OrbitalSync/Rendezvous/RendezvousHandler.swift
+git rm Sources/OrrerySync/Rendezvous/RendezvousHandler.swift
 ```
 
 - [ ] **Step 4: Rewrite RendezvousServer.swift**
@@ -1228,7 +1228,7 @@ import Logging
 /// Does NOT relay data — only exchanges peer connection info.
 actor RendezvousServer {
     let port: Int
-    let logger = Logger(label: "orbital-sync.rendezvous")
+    let logger = Logger(label: "orrery-sync.rendezvous")
 
     private var serverListener: PeerDispatcherListener?
     /// teamID → [peerID: registration]
@@ -1343,7 +1343,7 @@ import Logging
 actor RendezvousClient {
     let serverHost: String
     let serverPort: Int
-    let logger = Logger(label: "orbital-sync.rv-client")
+    let logger = Logger(label: "orrery-sync.rv-client")
 
     private var dispatcher: PeerDispatcher?
     private var heartbeatTask: Task<Void, Never>?
@@ -1423,8 +1423,8 @@ Expected: all tests pass (SyncMessages, SyncDaemon, Rendezvous).
 - [ ] **Step 8: Commit**
 
 ```bash
-git add Sources/OrbitalSync/Rendezvous/RendezvousServer.swift Sources/OrbitalSync/Rendezvous/RendezvousClient.swift Tests/OrbitalSyncTests/RendezvousTests.swift
-git rm Sources/OrbitalSync/Rendezvous/RendezvousHandler.swift
+git add Sources/OrrerySync/Rendezvous/RendezvousServer.swift Sources/OrrerySync/Rendezvous/RendezvousClient.swift Tests/OrrerySyncTests/RendezvousTests.swift
+git rm Sources/OrrerySync/Rendezvous/RendezvousHandler.swift
 git commit -m "feat: migrate RendezvousServer + RendezvousClient to PeerDispatcher"
 ```
 

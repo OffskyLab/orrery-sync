@@ -1,11 +1,11 @@
-# orbital-sync — Development Guidelines
+# orrery-sync — Development Guidelines
 
 ## Versioning
 
-- orbital-sync and Orbital share the same version number (e.g. both at 1.0.0).
+- orrery-sync and Orrery share the same version number (e.g. both at 1.0.0).
 - When bumping version, update both repos together.
 - Version locations in this repo:
-  - `Sources/OrbitalSync/OrbitalSync.swift` — `version:` field
+  - `Sources/OrrerySync/OrrerySync.swift` — `version:` field
   - `CHANGELOG.md`
 
 ## Release Checklist
@@ -15,7 +15,7 @@
 3. Commit and push
 4. Tag `vX.Y.Z` and push tag (triggers CI)
 5. Wait for CI to complete
-6. Update `homebrew-orbital/Formula/orbital-sync.rb` with new sha256
+6. Update `homebrew-orrery/Formula/orrery-sync.rb` with new sha256
 7. Push homebrew formula
 
 ## Architecture

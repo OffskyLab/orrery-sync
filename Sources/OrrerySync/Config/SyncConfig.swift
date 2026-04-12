@@ -1,6 +1,6 @@
 import Foundation
 
-/// Persistent configuration stored at ~/.orbital/sync-config.json
+/// Persistent configuration stored at ~/.orrery/sync-config.json
 struct SyncConfig: Codable, Sendable {
     var team: TeamConfig?
     var knownPeers: [KnownPeer]
@@ -33,10 +33,10 @@ struct SyncConfig: Codable, Sendable {
     }
 
     static func configPath() -> String {
-        if let home = ProcessInfo.processInfo.environment["ORBITAL_HOME"] {
+        if let home = ProcessInfo.processInfo.environment["ORRERY_HOME"] {
             return home + "/sync-config.json"
         }
-        return FileManager.default.homeDirectoryForCurrentUser.path + "/.orbital/sync-config.json"
+        return FileManager.default.homeDirectoryForCurrentUser.path + "/.orrery/sync-config.json"
     }
 }
 

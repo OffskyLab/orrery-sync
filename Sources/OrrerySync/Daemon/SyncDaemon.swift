@@ -17,7 +17,7 @@ actor SyncDaemon {
     let peerID: String
     let tls: SyncTLSContext?
     let rendezvousAddress: String?
-    let logger = Logger(label: "orbital-sync")
+    let logger = Logger(label: "orrery-sync")
 
     private var peerListener: PeerListener?
     private var peers: [String: PeerConnection] = [:]
@@ -30,7 +30,7 @@ actor SyncDaemon {
     #endif
     private var rvClient: RendezvousClient?
 
-    static let version = "1.0.0"
+    static let version = "2.0.0"
 
     init(port: Int, syncDirectory: String, socketPath: String, tls: SyncTLSContext? = nil, rendezvousAddress: String? = nil) {
         self.port = port
@@ -522,7 +522,7 @@ actor SyncDaemon {
                 break
             }
         }
-        connection.start(queue: DispatchQueue(label: "orbital-sync.resolve"))
+        connection.start(queue: DispatchQueue(label: "orrery-sync.resolve"))
     }
     #endif
 

@@ -6,7 +6,7 @@ struct StatusCommand: AsyncParsableCommand {
         abstract: "Show daemon and peer status"
     )
 
-    @OptionGroup var globals: OrbitalSyncCommand
+    @OptionGroup var globals: OrrerySyncCommand
 
     func run() async throws {
         let socketPath = resolveSocketPath(from: globals.socket)
@@ -22,7 +22,7 @@ struct StatusCommand: AsyncParsableCommand {
                 print("Error: \(response.message)")
             }
         } catch SyncError.daemonNotRunning {
-            print("Daemon is not running. Start it with: orbital-sync daemon")
+            print("Daemon is not running. Start it with: orrery-sync daemon")
         }
     }
 }

@@ -4,7 +4,7 @@ import NIOSSL
 import NMTP
 import Synchronization
 
-/// Concrete `TLSContext` implementation for orbital-sync.
+/// Concrete `TLSContext` implementation for orrery-sync.
 ///
 /// Uses swift-nio-ssl (BoringSSL) for mTLS — both peers present certificates
 /// signed by a shared CA. Any peer with an unknown cert is rejected at handshake.

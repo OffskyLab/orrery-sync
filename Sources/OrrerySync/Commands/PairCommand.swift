@@ -6,7 +6,7 @@ struct PairCommand: AsyncParsableCommand {
         abstract: "Pair with a remote peer"
     )
 
-    @OptionGroup var globals: OrbitalSyncCommand
+    @OptionGroup var globals: OrrerySyncCommand
 
     @Argument(help: "Remote peer address (host:port)")
     var address: String
@@ -32,7 +32,7 @@ struct PairCommand: AsyncParsableCommand {
                 print("Error: \(response.message)")
             }
         } catch SyncError.daemonNotRunning {
-            print("Daemon is not running. Start it with: orbital-sync daemon")
+            print("Daemon is not running. Start it with: orrery-sync daemon")
         }
     }
 }

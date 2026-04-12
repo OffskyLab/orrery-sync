@@ -7,7 +7,7 @@ struct DaemonCommand: AsyncParsableCommand {
         abstract: "Start the sync daemon"
     )
 
-    @OptionGroup var globals: OrbitalSyncCommand
+    @OptionGroup var globals: OrrerySyncCommand
 
     @Option(name: .shortAndLong, help: "Port for NMT server")
     var port: Int = 9527
@@ -42,7 +42,7 @@ struct DaemonCommand: AsyncParsableCommand {
             print("mTLS enabled")
         }
 
-        print("Starting orbital-sync daemon on port \(port)")
+        print("Starting orrery-sync daemon on port \(port)")
         print("Sync directory: \(resolvedDir)")
         print("Control socket: \(socketPath)")
 
@@ -57,9 +57,9 @@ struct DaemonCommand: AsyncParsableCommand {
     }
 
     private func defaultSyncDirectory() -> String {
-        if let custom = ProcessInfo.processInfo.environment["ORBITAL_HOME"] {
+        if let custom = ProcessInfo.processInfo.environment["ORRERY_HOME"] {
             return custom + "/shared"
         }
-        return FileManager.default.homeDirectoryForCurrentUser.path + "/.orbital/shared"
+        return FileManager.default.homeDirectoryForCurrentUser.path + "/.orrery/shared"
     }
 }

@@ -2,10 +2,10 @@ import ArgumentParser
 import Foundation
 
 @main
-struct OrbitalSyncCommand: AsyncParsableCommand {
+struct OrrerySyncCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-        commandName: "orbital-sync",
-        abstract: "P2P real-time sync daemon for Orbital",
+        commandName: "orrery-sync",
+        abstract: "P2P real-time sync daemon for Orrery",
         version: "1.0.0",
         subcommands: [
             DaemonCommand.self,
@@ -23,8 +23,8 @@ struct OrbitalSyncCommand: AsyncParsableCommand {
 /// Resolve socket path from parent options or default.
 func resolveSocketPath(from socket: String?) -> String {
     if let socket { return socket }
-    if let home = ProcessInfo.processInfo.environment["ORBITAL_HOME"] {
+    if let home = ProcessInfo.processInfo.environment["ORRERY_HOME"] {
         return home + "/sync.sock"
     }
-    return FileManager.default.homeDirectoryForCurrentUser.path + "/.orbital/sync.sock"
+    return FileManager.default.homeDirectoryForCurrentUser.path + "/.orrery/sync.sock"
 }

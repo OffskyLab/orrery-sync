@@ -8,7 +8,7 @@ import Logging
 actor RendezvousClient {
     let serverHost: String
     let serverPort: Int
-    let logger = Logger(label: "orbital-sync.rv-client")
+    let logger = Logger(label: "orrery-sync.rv-client")
 
     private var dispatcher: PeerDispatcher?
     private var runTask: Task<Void, Never>?

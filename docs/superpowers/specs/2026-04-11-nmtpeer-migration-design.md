@@ -1,8 +1,8 @@
-# orbital-sync: NMTPeer Migration Design
+# orrery-sync: NMTPeer Migration Design
 
 > **For agentic workers:** Use `superpowers:subagent-driven-development` or `superpowers:executing-plans` to implement this spec.
 
-**Goal:** Migrate `orbital-sync` from the asymmetric `NMTServer`/`NMTClient`/`NMTHandler` architecture to the symmetric `NMTPeer`/`PeerDispatcher` layer. This is a clean-break migration — no backward compatibility with v1.x wire format.
+**Goal:** Migrate `orrery-sync` from the asymmetric `NMTServer`/`NMTClient`/`NMTHandler` architecture to the symmetric `NMTPeer`/`PeerDispatcher` layer. This is a clean-break migration — no backward compatibility with v1.x wire format.
 
 **Architecture:** Replace string-based method dispatch (`CallBody(method:arguments:)`) with typed `PeerMessage` conformers identified by `UInt16` messageType. `PeerDispatcher.listen` replaces `NMTServer` + `SyncHandler`. `PeerDispatcher.connect` replaces `NMTClient`. Reverse-pairing is eliminated — NMTPeer is symmetric, so both sides of a connection hold a `Peer` and can request/reply bidirectionally. Rendezvous server follows the same pattern.
 
@@ -16,20 +16,20 @@
 
 | File | Reason |
 |------|--------|
-| `Sources/OrbitalSync/Sync/SyncMethods.swift` | String method constants replaced by `UInt16` messageType on each `PeerMessage` conformer |
-| `Sources/OrbitalSync/Daemon/SyncHandler.swift` | Handler logic moves into `SyncDaemon` as `PeerDispatcher.register` calls |
-| `Sources/OrbitalSync/Rendezvous/RendezvousHandler.swift` | Same — logic moves into `RendezvousServer` |
+| `Sources/OrrerySync/Sync/SyncMethods.swift` | String method constants replaced by `UInt16` messageType on each `PeerMessage` conformer |
+| `Sources/OrrerySync/Daemon/SyncHandler.swift` | Handler logic moves into `SyncDaemon` as `PeerDispatcher.register` calls |
+| `Sources/OrrerySync/Rendezvous/RendezvousHandler.swift` | Same — logic moves into `RendezvousServer` |
 
 ### Modified/rewritten files
 
 | File | Change |
 |------|--------|
 | `Package.swift` | Add `NMTPeer` product dependency from `swift-nmtp` |
-| `Sources/OrbitalSync/Sync/SyncBodies.swift` | All structs conform to `PeerMessage`; add `static var messageType: UInt16`; rename to `SyncMessages.swift` |
-| `Sources/OrbitalSync/Daemon/PeerConnection.swift` | `client: NMTClient` → `dispatcher: PeerDispatcher`; add `isInitiator: Bool` |
-| `Sources/OrbitalSync/Daemon/SyncDaemon.swift` | Major refactor (see below) |
-| `Sources/OrbitalSync/Rendezvous/RendezvousServer.swift` | `NMTServer` → `PeerDispatcher.listen`; register RV handlers inline |
-| `Sources/OrbitalSync/Rendezvous/RendezvousClient.swift` | `NMTClient` → `PeerDispatcher.connect` + typed `request<M,R>` |
+| `Sources/OrrerySync/Sync/SyncBodies.swift` | All structs conform to `PeerMessage`; add `static var messageType: UInt16`; rename to `SyncMessages.swift` |
+| `Sources/OrrerySync/Daemon/PeerConnection.swift` | `client: NMTClient` → `dispatcher: PeerDispatcher`; add `isInitiator: Bool` |
+| `Sources/OrrerySync/Daemon/SyncDaemon.swift` | Major refactor (see below) |
+| `Sources/OrrerySync/Rendezvous/RendezvousServer.swift` | `NMTServer` → `PeerDispatcher.listen`; register RV handlers inline |
+| `Sources/OrrerySync/Rendezvous/RendezvousClient.swift` | `NMTClient` → `PeerDispatcher.connect` + typed `request<M,R>` |
 
 ---
 
@@ -241,7 +241,7 @@ let reply = try await dispatcher.request(
 
 ## Testing
 
-Integration tests in `Tests/OrbitalSyncTests/`:
+Integration tests in `Tests/OrrerySyncTests/`:
 
 ### Task 1 (Package + Messages)
 - `SyncMessages`: each struct has correct `messageType`, conforms to `PeerMessage`, round-trips through `JSONEncoder`/`JSONDecoder`
