@@ -140,7 +140,7 @@ Only memory files under `~/.orrery/shared/memory/`:
 
 | Path | Content | Sync behavior |
 |------|---------|---------------|
-| `memory/*/ORRERY_MEMORY.md` | Shared memory | Via fragments |
+| `memory/*/MEMORY.md` | Shared memory | Via fragments |
 | `memory/*/fragments/` | Memory fragments | Conflict-free sync |
 
 Sessions (`claude/`, `codex/`, `gemini/`) are **not synced** — they are machine-specific (bound to local paths and environment accounts) and not useful across peers.
@@ -148,7 +148,7 @@ Sessions (`claude/`, `codex/`, `gemini/`) are **not synced** — they are machin
 ### Memory fragment workflow
 
 When memory is written on Machine A:
-1. `ORRERY_MEMORY.md` is updated locally
+1. `MEMORY.md` is updated locally
 2. A fragment file is created in `fragments/`
 3. Fragment syncs to all peers
 4. On Machine B, next agent session reads memory → sees pending fragments → consolidates → writes back → fragments cleaned up
